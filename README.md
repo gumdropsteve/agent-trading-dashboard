@@ -51,30 +51,32 @@ The simulated agent runs the Portal actions from `baum-docs/portal/actions.md`: 
 
 ## Replaying a real wallet
 
-`scripts/build_replay.py` turns any Solana wallet into a replay file. It uses only the standard library and needs no API keys:
+`scripts/build_replay.py` turns any Solana wallet into a replay file. It uses only the standard library:
 
 ```sh
-python3 scripts/build_replay.py <wallet> --label "Baum test wallet"   # writes data/replay-<first4>.js
+SOLANA_RPC_URL=<alchemy or helius url> python3 scripts/build_replay.py <wallet> --label "Baum wallet"   # writes data/replay-<first4>.js
 open "index.html?replay=<first4>"
 ```
 
+Use a paid RPC. Stable's Alchemy Solana URL is `ALCHEMY_SOLANA_RPC_URL` in `ecosystem-contracts/usdx-contracts/ecosystem-api/.env`. The Helius key there (`SOLANA_RPC_URL`) is currently out of credits. When Helius is used (a Helius `SOLANA_RPC_URL` or `HELIUS_API_KEY`), swaps also get their venue from its parsed-transactions API. Otherwise the venue comes from the program IDs in the transaction logs, which covers Jupiter, DFlow, Raydium, Orca, Meteora and Pump.fun. Keys are redacted from logs and never written to the output.
+
 What it does, which is a small version of the pipeline below:
 
-1. **Pulls every transaction** for the wallet from a Solana RPC (`--rpc` or `SOLANA_RPC_URL`; the public endpoint works for small wallets).
+1. **Pulls every transaction** for the wallet from a Solana RPC (`--rpc` or `SOLANA_RPC_URL`; falls back to the public endpoint, which rate-limits).
 2. **Reduces each one to the wallet's own balance changes** (SOL and SPL tokens), so it doesn't matter which aggregator routed the swap (Jupiter, DFlow, a relayer).
 3. **Classifies each one**: one asset in and one out is a swap, only in is a deposit, only out is a withdrawal. SOL moves under 0.0025 are fees or rent, not a trade leg. The swap's quote leg (USDC > USDT > USDX > SOL) prices it, and the other leg is the lane it appears in.
 4. **Accounts for it**: average cost per asset, realized PnL on sells, and deposits and withdrawals tracked as net deposits so moving money in and out never shows up as profit or loss. **PnL = equity − net deposits.**
 5. **Marks holdings to market** every 15 minutes using GeckoTerminal candles from each token's deepest pool (DexScreener finds the pool when GeckoTerminal doesn't know the token). USDC and USDT are pinned at $1.
 6. **Writes `data/replay-<id>.js`**: the events, a mark-to-market series (equity, net deposits, PnL, realized, per-asset value), and token metadata. The page only replays it and derives nothing itself.
 
-What the `6s8J` wallet shows (Sep 20–26): 11 trades and 4 deposits or withdrawals, ending at **$181.53 equity on $165.93 net deposits (+$15.59), with +$3.90 realized**. The best trade was selling half a PAID position at +134%. The chart shows a SHARTCOIN position that ran to 3x on paper, then sold a day later at +7.6%. Unrealized PnL like that is exactly what a live view makes visible.
+What the `6s8J` wallet shows (Sep 20–26): the trades were placed through the Baum chat, 6 routed via Jupiter and 4 via DFlow. That's 11 trades and 4 deposits or withdrawals, ending at **$180.34 equity on $165.93 net deposits (+$14.40), with +$3.90 realized**. The best trade was selling half a PAID position at +134%. The chart shows a SHARTCOIN position that ran to 3x on paper, then sold a day later at +7.6%. Unrealized PnL like that is exactly what a live view makes visible.
 
 Limitations of this first version:
 
-- **The descriptions aren't Baum's reasoning.** They're generated from the chain ("sold 50% of the position at +134% vs average cost"). The real reason feed needs the harness hook described below.
+- **The descriptions aren't the reason for each trade.** They're generated from the chain ("sold 50% of the position at +134% vs average cost"). These trades were placed through the Baum chat, so the reason is the chat message that asked for them. Join the Telegram bot's log to each tx signature to show it. For trades Baum makes on its own (Portal actions), the harness hook below supplies the reason.
 - **Multi-leg transactions are skipped** (e.g. an LP deposit that takes two tokens in one tx). None occur in this wallet.
 - **Marks are 15-minute closes**, so a position bought and sold inside one candle shows its realized PnL but not its intra-candle path.
-- **Public endpoints rate-limit.** The script backs off, but a wallet with thousands of transactions wants a Helius or Triton RPC.
+- **Prices come from GeckoTerminal's free API**, which rate-limits at about 30 requests a minute. The script backs off; neither Alchemy nor Helius serves historical token prices. For many wallets, add a paid price source (Birdeye, or CoinGecko Pro's on-chain OHLCV).
 - **Solana only.** Robinhood Chain needs the same reducer over Blockscout's token-transfer API.
 
 ## How to build the real thing

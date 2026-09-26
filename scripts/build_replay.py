@@ -3,7 +3,12 @@
 
     python3 scripts/build_replay.py <wallet> [--rpc URL] [--out data/replay-<first4>.js]
 
-Stdlib only. Pulls every transaction for the wallet from a Solana RPC, reduces each one to the
+    # with Helius (recommended): faster, no public rate limits, and swaps get their venue
+    HELIUS_API_KEY=... python3 scripts/build_replay.py <wallet>
+
+Stdlib only. RPC resolution: --rpc, else SOLANA_RPC_URL, else Helius when HELIUS_API_KEY is set
+(or when SOLANA_RPC_URL is a Helius URL, its api-key is reused), else the public endpoint. The key
+never reaches the output file. Pulls every transaction for the wallet from a Solana RPC, reduces each one to the
 wallet's own balance changes (SOL + SPL tokens), classifies it as a swap, deposit or withdrawal,
 and marks holdings to market with 15-minute candles from GeckoTerminal (DexScreener fallback
 for finding a pool). All accounting happens here, and the page only replays the result:
@@ -14,7 +19,7 @@ profit. Realized PnL uses average cost per asset. Swaps don't record why they we
 event carries a factual, auto-generated description (reason_source: "auto") until the harness
 logs Baum's own rationale.
 """
-import argparse, bisect, json, os, sys, time, urllib.request
+import argparse, bisect, json, os, sys, time, urllib.parse, urllib.request
 
 STABLES = {"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": "USDC", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": "USDT"}
 SOL_MINT = "So11111111111111111111111111111111111111112"
@@ -32,7 +37,14 @@ def http_json(url, body=None, tries=8):
         except Exception as e:  # rate limits on public endpoints; back off, longer on 429
             err = e
             time.sleep((15 if getattr(e, "code", None) == 429 else 2) * (i + 1))
-    raise RuntimeError(f"{url}: {err}")
+    raise RuntimeError(f"{redact(url)}: {err}")
+
+
+def redact(url):
+    """Drop query strings and path keys so API keys never reach logs."""
+    u = urllib.parse.urlparse(url)
+    path = "/<key>" if "alchemy.com" in (u.hostname or "") and u.path.count("/") >= 2 else u.path
+    return f"{u.scheme}://{u.hostname}{path}" + ("?<redacted>" if u.query else "")
 
 
 def rpc(url, method, params):
@@ -42,7 +54,51 @@ def rpc(url, method, params):
     return r["result"]
 
 
-def fetch_txs(rpc_url, wallet):
+def helius_key(rpc_url):
+    if os.environ.get("HELIUS_API_KEY"):
+        return os.environ["HELIUS_API_KEY"]
+    u = urllib.parse.urlparse(rpc_url or "")
+    if u.hostname and u.hostname.endswith("helius-rpc.com"):
+        return (urllib.parse.parse_qs(u.query).get("api-key") or [None])[0]
+    return None
+
+
+def helius_venues(key, wallet):
+    """signature -> (type, source) from Helius's parsed-transactions API, e.g. ("SWAP", "JUPITER")."""
+    out, before = {}, None
+    while True:
+        q = {"api-key": key, "limit": 100, **({"before": before} if before else {})}
+        page = http_json(f"https://api.helius.xyz/v0/addresses/{wallet}/transactions?{urllib.parse.urlencode(q)}")
+        for t in page:
+            out[t["signature"]] = (t.get("type"), t.get("source"))
+        if len(page) < 100:
+            return out
+        before = page[-1]["signature"]
+
+
+VENUE = {"JUPITER": "Jupiter", "DFLOW": "DFlow", "RAYDIUM": "Raydium", "ORCA": "Orca", "METEORA": "Meteora",
+         "PUMP_FUN": "Pump.fun", "PUMP_AMM": "PumpSwap", "OKX_DEX_ROUTER": "OKX", "PHOENIX": "Phoenix", "LIFINITY": "Lifinity"}
+
+
+# Venue from the programs a tx invoked (top-level or CPI, read from the logs). Works on any RPC.
+PROGRAM_VENUE = {
+    "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4": "Jupiter", "JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB": "Jupiter",
+    "DF1ow4tspfHX9JwWJsAb9epbkA8hmpSEAtxXy1V27QBH": "DFlow",
+    "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P": "Pump.fun", "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA": "PumpSwap",
+    "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8": "Raydium", "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK": "Raydium",
+    "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C": "Raydium", "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc": "Orca",
+    "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo": "Meteora", "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG": "Meteora",
+}
+
+
+def program_venue(tx):
+    for pid, name in PROGRAM_VENUE.items():  # aggregators first: they're listed before AMMs
+        if pid in tx["programs"] or f"Program {pid} invoke" in tx["logs"]:
+            return name
+    return None
+
+
+def fetch_txs(rpc_url, wallet, delay=0.4):
     sigs, before = [], None
     while True:
         opts = {"limit": 1000, **({"before": before} if before else {})}
@@ -70,7 +126,7 @@ def fetch_txs(rpc_url, wallet):
                     "programs": sorted({ix.get("programId") for ix in msg["instructions"]}),
                     "logs": " ".join(meta.get("logMessages") or []),
                     "delta": {m: v for m, v in d.items() if abs(v) > 1e-12}})
-        time.sleep(0.4)
+        time.sleep(delay)
     return out
 
 
@@ -129,15 +185,25 @@ class Prices:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("wallet")
-    ap.add_argument("--rpc", default=os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com"))
+    ap.add_argument("--rpc", default=os.environ.get("SOLANA_RPC_URL"))
     ap.add_argument("--out")
     ap.add_argument("--label", default="Baum wallet")
     a = ap.parse_args()
     W = a.wallet
     out_path = a.out or os.path.join(os.path.dirname(__file__), "..", "data", f"replay-{W[:4]}.js")
 
-    print(f"fetching transactions for {W}…", file=sys.stderr)
-    txs = fetch_txs(a.rpc, W)
+    key = helius_key(a.rpc)
+    rpc_url = a.rpc or (f"https://mainnet.helius-rpc.com/?api-key={key}" if key else "https://api.mainnet-beta.solana.com")
+    host = urllib.parse.urlparse(rpc_url).hostname
+    print(f"fetching transactions for {W} via {host}…", file=sys.stderr)
+    txs = fetch_txs(rpc_url, W, delay=0.4 if host == "api.mainnet-beta.solana.com" else 0.05)
+    venues = {}
+    if key:
+        try:
+            venues = helius_venues(key, W)
+            print(f"  venues for {sum(1 for v in venues.values() if v[1] in VENUE)} swaps from Helius", file=sys.stderr)
+        except Exception as e:
+            print(f"  Helius parsed transactions unavailable ({e}); using program IDs for venues", file=sys.stderr)
     mints = sorted({m for t in txs for m in t["delta"]})
     meta = {m: token_meta(m) for m in mints}
     sym = {m: meta[m]["symbol"] for m in mints}
@@ -165,6 +231,10 @@ def main():
         for s, v in legs.items():
             units[s] = units.get(s, 0.0) + v
         ev = {"t": t, "sig": tx["sig"], "relayer": tx["signer"] if tx["signer"] != W else None}
+        src = (venues.get(tx["sig"]) or (None, None))[1]
+        venue = VENUE.get(src) or program_venue(tx)
+        if venue:
+            ev["venue"] = venue
         if len(ins) == 1 and len(outs) == 1:
             (si, ai), (so, ao) = next(iter(ins.items())), next(iter(outs.items()))
             quote = min((si, so), key=lambda s: QUOTE_ORDER.index(s) if s in QUOTE_ORDER else 99)
@@ -250,17 +320,18 @@ def fmt_px(p):
 def describe(ev):
     who = f"{ev['relayer'][:4]}…{ev['relayer'][-4:]}" if ev.get("relayer") else ""
     relay = f" Filled by relayer {who}." if who else ""
+    via = f" via {ev['venue']}" if ev.get("venue") else ""
     if ev["kind"] == "dep":
         src = f" from {who}" if who else ""
         return f"{abs(ev['units']):,.4g} {ev['label'].split()[-1]} (${ev['notional']:,.2f}) arrived{src}. Counted as a deposit, not profit."
     if ev["kind"] == "wd":
         return f"{abs(ev['units']):,.4g} {ev['label'].split()[-1]} (${ev['notional']:,.2f}) left the wallet. Counted as a withdrawal, not a loss.{relay}"
     if ev["kind"] == "inc":
-        return f"{ev['pair']}: {abs(ev['units']):,.4g} {ev['lane']} for ${ev['notional']:,.2f} at {fmt_px(ev['price'])}.{relay}"
+        return f"{ev['pair']}{via}: {abs(ev['units']):,.4g} {ev['lane']} for ${ev['notional']:,.2f} at {fmt_px(ev['price'])}.{relay}"
     pos = "the whole position" if ev.get("share", 1) > 0.98 else f"{ev['share'] * 100:.0f}% of the position"
     r = ev.get("ret")
     perf = f" {'+' if r >= 0 else '−'}{abs(r) * 100:.1f}% vs average cost, realized {'+' if ev['realized'] >= 0 else '−'}${abs(ev['realized']):,.2f}." if r is not None else ""
-    return f"{ev['pair']}: sold {pos} at {fmt_px(ev['price'])} for ${ev['notional']:,.2f}.{perf}{relay}"
+    return f"{ev['pair']}{via}: sold {pos} at {fmt_px(ev['price'])} for ${ev['notional']:,.2f}.{perf}{relay}"
 
 
 if __name__ == "__main__":

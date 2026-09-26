@@ -583,7 +583,7 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
   function setStatus(li, ev) {
     const [s1, s2] = li._st;
     if (ev.status === "pending") { s1.textContent = "sent · awaiting confirmation"; s1.className = ""; }
-    else { s1.textContent = RP ? "✓ on-chain" : "✓ confirmed in " + (ev.confirmedAt - ev.t) + " min"; s1.className = "ok"; }
+    else { s1.textContent = RP ? "✓ on-chain" + (ev.venue ? " · " + ev.venue : "") : "✓ confirmed in " + (ev.confirmedAt - ev.t) + " min"; s1.className = "ok"; }
     s2.textContent = "";
     if (ev.sig) { const a = document.createElement("a"); a.href = "https://solscan.io/tx/" + encodeURIComponent(ev.sig); a.target = "_blank"; a.rel = "noopener"; a.textContent = ev.tx; s2.appendChild(a); }
     else s2.textContent = ev.tx;
@@ -846,6 +846,7 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
       tip.appendChild(t);
       tip.appendChild(row(ev.label, usdC(ev.notional), C[ev.kind]));
       if (ev.lane !== "LP" && ev.lane !== "LEND") { tip.appendChild(row("size", units(ev.units))); if (ev.lane !== "WALLET") tip.appendChild(row("price", px(ev.price))); }
+      if (ev.venue) tip.appendChild(row("venue", ev.venue));
       if (ev.realized) tip.appendChild(row("realized", usdS(ev.realized)));
       tip.appendChild(row("status", ev.status));
       const why = document.createElement("div"); why.className = "why"; why.textContent = ev.reason; tip.appendChild(why);
@@ -957,12 +958,12 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
     RP.cur = null;
     // header + labels
     const w = D.wallet;
-    $("subLabel").textContent = "Solana wallet " + w.slice(0, 4) + "…" + w.slice(-4);
+    $("subLabel").textContent = (D.label || "Solana wallet") + " · " + w.slice(0, 4) + "…" + w.slice(-4);
     $("subLabel").title = w;
     $("modeLabel").textContent = "REPLAY · ON-CHAIN DATA";
     $("feedTitle").textContent = "What Baum did";
     $("feedNote").hidden = false;
-    $("feedNote").textContent = "Descriptions are generated from chain data. Baum's own reasoning shows here once the harness logs it.";
+    $("feedNote").textContent = "Trades placed through the Baum chat. Descriptions come from chain data; the instruction behind each trade shows here once chat logs are joined in.";
     $("posNote").textContent = "value at 15-minute marks · bars scale to the largest holding";
     $("lgFlow").hidden = false; $("lgPend").hidden = true;
     $("footSim").hidden = true; $("footReal").hidden = false;
