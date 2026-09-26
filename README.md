@@ -28,6 +28,7 @@ URL parameters:
 | Param | Effect |
 |---|---|
 | `replay=<id>` | Load `data/replay-<id>.js` instead of the simulator |
+| `live=1` | With `replay`, follow the wallet live (needs `scripts/follow.py` running) |
 | `at=end` | Jump straight to the end of a replay (for screenshots and sharing a still) |
 | `theme=light` / `theme=dark` | Force a theme (otherwise the page follows the OS) |
 
@@ -78,6 +79,22 @@ Limitations of this first version:
 - **Marks are 15-minute closes**, so a position bought and sold inside one candle shows its realized PnL but not its intra-candle path.
 - **Prices come from GeckoTerminal's free API**, which rate-limits at about 30 requests a minute. The script backs off; neither Alchemy nor Helius serves historical token prices. For many wallets, add a paid price source (Birdeye, or CoinGecko Pro's on-chain OHLCV).
 - **Solana only.** Robinhood Chain needs the same reducer over Blockscout's token-transfer API.
+
+## Following a wallet live
+
+```sh
+SOLANA_RPC_URL=<alchemy or helius url> python3 scripts/follow.py <wallet>
+```
+
+This serves the repo at `http://localhost:8765` and opens the **Live** view (`?replay=<first4>&live=1`). Every 15 seconds (`--interval`) the script:
+
+- fetches only the wallet's **new** transactions, at `confirmed` commitment, so trades show up within seconds of landing;
+- marks holdings with **current** GeckoTerminal prices, so the PnL line moves between trades, and refreshes the 15-minute candles every 10 minutes to stay under the free rate limit;
+- rewrites `data/replay-<first4>.js` atomically.
+
+The page re-reads that file every 5 seconds and animates new trades onto the lanes and into the feed. The badge shows **LIVE · ON-CHAIN** while updates are arriving, and **NOT LIVE** when the file is more than a minute stale (the follower isn't running).
+
+This is the local version of the hosted design below. The follower becomes a webhook-fed service, and the file re-read becomes an SSE stream.
 
 ## How to build the real thing
 
@@ -144,7 +161,7 @@ A grid of all 3,888 Deed Deck cards. A card flashes in the action's color when i
 ## Rollout
 
 1. **Wallet replay (no harness changes).** ✅ Prototyped: `scripts/build_replay.py` plus `?replay=`. The USDX vault turned out to be mostly deposits and locks, so the first real replay is a Baum trading wallet instead. Next: run it on the wallets with the most activity, and record a clip for @baumreview to post in reply to Kyle.
-2. **Live vault + chat swaps.** Add the decision-event hook to the harness so the reason feed is real. Stream live.
+2. **Live.** ✅ Local version: `scripts/follow.py` plus `?live=1`. Next: host it (Helius webhook or Alchemy address activity → Railway service → SSE) so a link works for anyone, and join the Baum chat log so each trade shows the instruction behind it.
 3. **Broker wallets at beta (~Oct 1).** Index every Broker wallet, add the opt-in per-Broker pages, and ship the fleet view.
 4. **Perps.** When perps reach the Portal, add leverage, liquidation price and funding to the lanes and positions. The schema above already has fields for them.
 

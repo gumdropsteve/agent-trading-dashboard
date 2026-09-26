@@ -69,6 +69,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; }
 body {
   background: var(--bg);
@@ -94,6 +95,7 @@ header.top {
 }
 .badge .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--yld); }
 .playing .badge .pulse { animation: pulse 1.6s ease-in-out infinite; }
+.stale .badge .pulse { background: var(--text-muted); animation: none; }
 @keyframes pulse { 50% { opacity: 0.25; } }
 
 .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -215,9 +217,10 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
       <nav class="seg" id="src" aria-label="Data source">
         <a href="?" data-src="">Simulated</a>
         <a href="?replay=6s8J" data-src="6s8J">Real wallet</a>
+        <a href="?replay=6s8J&live=1" data-src="6s8J-live">Live</a>
       </nav>
       <button class="btn" id="play" type="button">Pause</button>
-      <span class="ctl-label">Speed</span>
+      <span class="ctl-label" id="speedLbl">Speed</span>
       <div class="seg" id="speed" role="group" aria-label="Replay speed">
         <button type="button" data-v="1" aria-pressed="false">1 min/s</button>
         <button type="button" data-v="10" aria-pressed="true">10 min/s</button>
@@ -342,6 +345,7 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
   let LANE_NAME = { ETH: "ETH", BAUM: "BAUM", NVDA: "NVDA (Stock Token)", "ETH-PERP": "ETH-PERP", LP: "LP USDX/USDG", LEND: "Lend USDG" };
   const params = new URLSearchParams(location.search);
   const REPLAY_ID = (params.get("replay") || "").replace(/[^A-Za-z0-9_-]/g, "");
+  const LIVE = !!REPLAY_ID && params.get("live") === "1";
   let RP = null;          // replay state when a wallet file is loaded
   const events = [];      // every action ever
   const pending = new Set(); // lanes with an unconfirmed tx
@@ -916,7 +920,7 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
   // ---------- run ----------
   try { const th = new URLSearchParams(location.search).get("theme"); if (th === "light" || th === "dark") document.documentElement.dataset.theme = th; } catch (e) {}
   readColors();
-  document.querySelectorAll("#src a").forEach((a) => { if (a.dataset.src === REPLAY_ID) a.setAttribute("aria-current", "page"); });
+  document.querySelectorAll("#src a").forEach((a) => { if (a.dataset.src === REPLAY_ID + (LIVE ? "-live" : "")) a.setAttribute("aria-current", "page"); });
   const th = params.get("theme");
   document.querySelectorAll("#src a").forEach((a) => { if (th === "light" || th === "dark") a.href += (a.href.includes("?replay") ? "&" : "") + "theme=" + th; });
   function boot() {
@@ -939,23 +943,32 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
   }
 
   // ---------- replay of a real wallet ----------
-  function startReplay(D) {
-    RP = { D, done: false };
-    DEC = 2;
-    T0 = D.t0 * 1000;
-    const min = (t) => (t - D.t0) / 60;
+  function ingest(D) {
+    RP.D = D;
+    const min = (t) => (t - RP.t0s) / 60;
     const trades = D.events.filter((e) => e.lane !== "WALLET");
     const lanes = [];
     trades.forEach((e) => { if (!lanes.includes(e.lane)) lanes.push(e.lane); });
     LANES = [...lanes, "WALLET"];
     LANE_NAME = { WALLET: "Deposits / withdrawals" };
     lanes.forEach((l) => (LANE_NAME[l] = (D.tokens[l] && D.tokens[l].name && D.tokens[l].name !== l ? D.tokens[l].name + " (" + l + ")" : l)));
-    RP.evs = D.events.map((e, i) => ({ ...e, id: i, t: min(e.t), tx: e.sig.slice(0, 6) + "…" + e.sig.slice(-4), status: "confirmed" }));
+    RP.evs = D.events.map((e, i) => ({ ...e, id: e.sig, t: min(e.t), tx: e.sig.slice(0, 6) + "…" + e.sig.slice(-4), status: "confirmed" }));
     RP.pts = D.series.map((p) => ({ ...p, t: min(p.t) }));
     RP.start = Math.max(0, RP.evs[0].t - 120);
     RP.end = RP.pts[RP.pts.length - 1].t;
     RP.nmax = Math.max(...RP.evs.map((e) => e.notional));
-    RP.cur = null;
+    const order = ["USDC", "USDT", ...lanes, ...D.symbols].filter((x, i, a) => D.symbols.includes(x) && a.indexOf(x) === i);
+    if (order.join("|") !== (RP.order || []).join("|")) { // a new token appeared: rebuild the rows
+      RP.order = order;
+      POSROWS = order.map((s) => ({ k: s, v: () => (RP.cur && RP.cur.pos[s]) || 0 }));
+      buildPositions(POSROWS);
+    }
+  }
+  function startReplay(D) {
+    RP = { done: false, live: LIVE, t0s: D.t0 };
+    DEC = 2;
+    T0 = D.t0 * 1000;
+    ingest(D);
     // header + labels
     const w = D.wallet;
     $("subLabel").textContent = (D.label || "Solana wallet") + " · " + w.slice(0, 4) + "…" + w.slice(-4);
@@ -974,14 +987,52 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
     };
     setSeg("speed", [[60, "1 h/s"], [360, "6 h/s"], [1440, "1 d/s"]], 360); speed = 360;
     setSeg("win", [[720, "12h"], [2880, "2d"], [0, "All"]], 0); windowAll = true;
-    const order = ["USDC", "USDT", ...lanes, ...D.symbols].filter((x, i, a) => D.symbols.includes(x) && a.indexOf(x) === i);
-    POSROWS = order.map((s) => ({ k: s, v: () => (RP.cur && RP.cur.pos[s]) || 0 }));
-    buildPositions(POSROWS);
     step = replayStep;
     restartReplay();
-    if (params.get("at") === "end") { RP.fast = true; while (!RP.done) step(); RP.fast = false; }
+    if (LIVE || params.get("at") === "end") { RP.fast = true; while (!RP.done) step(); RP.fast = false; }
     go();
-    if (RP.done) { setPlaying(false); playBtn.textContent = "Replay"; }
+    if (LIVE) enterLive();
+    else if (RP.done) { setPlaying(false); playBtn.textContent = "Replay"; }
+  }
+
+  // ---------- live: re-read the data file that scripts/follow.py keeps current ----------
+  function enterLive() {
+    RP.shown = new Set(events.map((e) => e.sig));
+    playBtn.hidden = true; $("speed").hidden = true; $("speedLbl").hidden = true;
+    $("posNote").textContent = "value at live prices · bars scale to the largest holding";
+    $("footReal").textContent = "Live view of a Solana wallet. scripts/follow.py polls it and marks holdings with current GeckoTerminal prices; this page re-reads the result every few seconds. Not financial advice.";
+    liveStatus();
+    setInterval(poll, 5000);
+  }
+  function poll() {
+    const sc = document.createElement("script");
+    sc.src = "data/replay-" + REPLAY_ID + ".js?v=" + Date.now();
+    sc.onload = () => {
+      sc.remove();
+      const D = window.BAUM_REPLAY;
+      if (D && D.generated_at !== RP.D.generated_at) { ingest(D); merge(); }
+      liveStatus();
+    };
+    sc.onerror = () => { sc.remove(); liveStatus(true); };
+    document.head.appendChild(sc);
+  }
+  function merge() {
+    series.length = 0;
+    RP.pts.forEach((p) => series.push(p));
+    RP.pi = RP.pts.length; RP.ei = RP.evs.length;
+    RP.cur = RP.pts[RP.pts.length - 1];
+    for (const e of RP.evs) {
+      if (RP.shown.has(e.sig)) continue;
+      RP.shown.add(e.sig);
+      const ev = { ...e, born: performance.now(), confirmedAt: e.t };
+      events.push(ev); onEvent(ev);
+    }
+  }
+  function liveStatus(err) {
+    const L = RP.D.live, age = L ? Date.now() / 1000 - L.updated : Infinity;
+    const stale = err || !L || age > Math.max(60, 4 * (L.interval || 15));
+    $("modeLabel").textContent = err ? "LIVE · DATA FILE MISSING" : stale ? "NOT LIVE · RUN scripts/follow.py" : "LIVE · ON-CHAIN";
+    app.classList.toggle("stale", stale);
   }
   function restartReplay() {
     events.length = 0; series.length = 0; feed.textContent = ""; feedEls.clear(); tbody.textContent = ""; rowEls.clear();
@@ -1016,7 +1067,9 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
     const best = tr.filter((e) => e.realized > 0).sort((a, b) => b.realized - a.realized)[0];
     $("tExp").textContent = best ? usdS(best.realized) : "–";
     $("tExpD").textContent = best ? best.label + (best.ret != null ? " · " + pct(best.ret, 0) : "") : "no closed winners yet";
-    $("clock").textContent = clockStr(Math.floor(Math.min(simT, RP.end)), true);
+    let clk = clockStr(Math.floor(Math.min(simT, RP.end)), true);
+    if (RP.live && RP.D.live) clk += " · updated " + Math.max(0, Math.round(Date.now() / 1000 - RP.D.live.updated)) + "s ago";
+    $("clock").textContent = clk;
   }
 
   let prev = performance.now(), lastSlow = 0;
@@ -1028,7 +1081,10 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
   }
   function frame(now) {
     const dt = Math.min(0.25, (now - prev) / 1000); prev = now;
-    if (playing) {
+    if (RP && RP.live) {
+      simT = (Date.now() / 1000 - RP.t0s) / 60;
+      RP.end = Math.max(RP.end, simT);
+    } else if (playing) {
       simT += dt * speed;
       if (RP) simT = Math.min(simT, RP.end + 1);
       while (tick < Math.floor(simT) && !(RP && RP.done)) step();

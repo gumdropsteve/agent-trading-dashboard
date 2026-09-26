@@ -98,10 +98,11 @@ def program_venue(tx):
     return None
 
 
-def fetch_txs(rpc_url, wallet, delay=0.4):
+def fetch_txs(rpc_url, wallet, delay=0.4, until=None):
+    """Successful txs, oldest first. With `until`, only those newer than that signature."""
     sigs, before = [], None
     while True:
-        opts = {"limit": 1000, **({"before": before} if before else {})}
+        opts = {"limit": 1000, "commitment": "confirmed", **({"before": before} if before else {}), **({"until": until} if until else {})}
         page = rpc(rpc_url, "getSignaturesForAddress", [wallet, opts])
         sigs += page
         if len(page) < 1000:
@@ -111,7 +112,9 @@ def fetch_txs(rpc_url, wallet, delay=0.4):
     for s in reversed(sigs):
         if s.get("err"):
             continue
-        tx = rpc(rpc_url, "getTransaction", [s["signature"], {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}])
+        tx = rpc(rpc_url, "getTransaction", [s["signature"], {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0, "commitment": "confirmed"}])
+        if tx is None:  # just landed and not queryable yet; the next poll picks it up
+            continue
         meta, msg = tx["meta"], tx["transaction"]["message"]
         keys = [k["pubkey"] for k in msg["accountKeys"]]
         d = {}
@@ -182,39 +185,34 @@ class Prices:
         return self.s[sym][max(0, i)][1]
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("wallet")
-    ap.add_argument("--rpc", default=os.environ.get("SOLANA_RPC_URL"))
-    ap.add_argument("--out")
-    ap.add_argument("--label", default="Baum wallet")
-    a = ap.parse_args()
-    W = a.wallet
-    out_path = a.out or os.path.join(os.path.dirname(__file__), "..", "data", f"replay-{W[:4]}.js")
+def resolve_rpc(rpc):
+    key = helius_key(rpc)
+    url = rpc or (f"https://mainnet.helius-rpc.com/?api-key={key}" if key else "https://api.mainnet-beta.solana.com")
+    return url, key
 
-    key = helius_key(a.rpc)
-    rpc_url = a.rpc or (f"https://mainnet.helius-rpc.com/?api-key={key}" if key else "https://api.mainnet-beta.solana.com")
-    host = urllib.parse.urlparse(rpc_url).hostname
-    print(f"fetching transactions for {W} via {host}…", file=sys.stderr)
-    txs = fetch_txs(rpc_url, W, delay=0.4 if host == "api.mainnet-beta.solana.com" else 0.05)
-    venues = {}
-    if key:
-        try:
-            venues = helius_venues(key, W)
-            print(f"  venues for {sum(1 for v in venues.values() if v[1] in VENUE)} swaps from Helius", file=sys.stderr)
-        except Exception as e:
-            print(f"  Helius parsed transactions unavailable ({e}); using program IDs for venues", file=sys.stderr)
-    mints = sorted({m for t in txs for m in t["delta"]})
-    meta = {m: token_meta(m) for m in mints}
-    sym = {m: meta[m]["symbol"] for m in mints}
-    print("tokens:", ", ".join(sym.values()), file=sys.stderr)
-    series = {}
-    for m in mints:
-        s = sym[m]
-        if s in ("USDC", "USDT"):
-            continue
-        series[s] = candles(m)
-        print(f"  {s}: {len(series[s])} candles", file=sys.stderr)
+
+def rpc_delay(url):
+    return 0.4 if urllib.parse.urlparse(url).hostname == "api.mainnet-beta.solana.com" else 0.05
+
+
+def load_market(txs, meta=None, series=None, refresh=False):
+    """Token metadata and 15m candles for every mint the txs touch. Reuses what's cached unless refresh."""
+    meta, series = dict(meta or {}), dict(series or {})
+    for m in sorted({m for t in txs for m in t["delta"]}):
+        if m not in meta:
+            meta[m] = token_meta(m)
+            print(f"  token {meta[m]['symbol']}", file=sys.stderr)
+        s = meta[m]["symbol"]
+        if s not in ("USDC", "USDT") and (refresh or s not in series):
+            series[s] = candles(m)
+    return meta, series
+
+
+def build(W, txs, meta, series, venues=None, label="Baum wallet", now=None):
+    """Replay data: classified events plus a mark-to-market series ending at `now`."""
+    venues = venues or {}
+    now = int(now or time.time())
+    sym = {m: meta[m]["symbol"] for m in meta}
     P = Prices(series)
 
     units, cost = {}, {}  # per symbol
@@ -223,7 +221,6 @@ def main():
     for tx in txs:
         t = tx["t"]
         legs = {sym[m]: v for m, v in tx["delta"].items()}
-        sol = legs.get("SOL", 0.0)
         trade = {s: v for s, v in legs.items() if not (s == "SOL" and abs(v) < SOL_DUST)}
         ins = {s: v for s, v in trade.items() if v > 0}
         outs = {s: -v for s, v in trade.items() if v < 0}
@@ -243,8 +240,7 @@ def main():
             if quote == so:  # bought asset
                 cost[asset] = cost.get(asset, 0.0) + usd
                 cost[quote] = cost.get(quote, 0.0) * (1 - ao / max(units[quote] + ao, 1e-18))
-                amt, px = ai, usd / ai
-                ev.update(lane=asset, kind="inc", label=f"Buy {asset}", units=amt, price=px, notional=usd, realized=0.0)
+                ev.update(lane=asset, kind="inc", label=f"Buy {asset}", units=ai, price=usd / ai, notional=usd, realized=0.0)
                 if asset.upper().startswith("MUSDX") and quote == "USDX":
                     ev["label"] = "Stake USDX → mUSDX"
             else:  # sold asset
@@ -254,22 +250,20 @@ def main():
                 cost[asset] = cost.get(asset, 0.0) - basis
                 cost[quote] = cost.get(quote, 0.0) + usd
                 realized += pnl
-                px = usd / ao
-                share = ao / held if held > 0 else 1
                 ev.update(lane=asset, kind="red", label=f"Sell {asset}" + (f" for {quote}" if quote not in ("USDC", "USDT") else ""),
-                          units=-ao, price=px, notional=usd, realized=pnl, share=share,
+                          units=-ao, price=usd / ao, notional=usd, realized=pnl, share=ao / held if held > 0 else 1,
                           ret=(pnl / basis) if basis > 0 else None)
             ev["pair"] = f"{so} → {si}"
         elif ins and not outs:
             s, v = next(iter(ins.items()))
-            usd = sum(v * P.at(s, t) for s, v in ins.items())
+            usd = sum(v2 * P.at(s2, t) for s2, v2 in ins.items())
             for s2, v2 in ins.items():
                 cost[s2] = cost.get(s2, 0.0) + v2 * P.at(s2, t)
             net_dep += usd
             ev.update(lane="WALLET", kind="dep", label=f"Deposit {s}", units=v, price=P.at(s, t), notional=usd, realized=0.0)
         elif outs and not ins:
             s, v = next(iter(outs.items()))
-            usd = sum(v * P.at(s, t) for s, v in outs.items())
+            usd = sum(v2 * P.at(s2, t) for s2, v2 in outs.items())
             for s2, v2 in outs.items():
                 held = units[s2] + v2
                 cost[s2] = cost.get(s2, 0.0) * (1 - v2 / held) if held > 0 else 0.0
@@ -283,11 +277,12 @@ def main():
         ev["net_deposits"] = net_dep
         ev["realized_total"] = realized
         events.append(ev)
+    if not events:
+        raise SystemExit("no swaps, deposits or withdrawals found for this wallet")
 
-    # mark-to-market series on a 15m grid, plus a point on each side of every event
+    # mark-to-market series on a 15m grid up to now, plus a point on each side of every event
     t0 = (events[0]["t"] // GRID) * GRID
-    t_end = max(max(v[-1][0] for v in series.values() if v), events[-1]["t"]) + GRID
-    ts = sorted(set(range(t0, t_end + 1, GRID)) | {e["t"] for e in events} | {e["t"] - 1 for e in events})
+    ts = sorted(set(range(t0, now, GRID)) | {now} | {e["t"] for e in events} | {e["t"] - 1 for e in events})
     pts, ei, hold, dep, real = [], 0, {}, 0.0, 0.0
     syms = sorted({s for e in events for s in e["holdings"]})
     for t in ts:
@@ -299,17 +294,51 @@ def main():
         pts.append({"t": t, "eq": round(eq, 4), "dep": round(dep, 4), "pnl": round(eq - dep, 4), "real": round(real, 4),
                     "pos": {s: round(v, 4) for s, v in vals.items() if abs(v) > 0.005}})
 
-    data = {"wallet": W, "chain": "solana", "label": a.label, "generated_at": int(time.time()), "t0": t0,
-            "symbols": syms, "tokens": {sym[m]: {"mint": m, **meta[m]} for m in mints},
+    mints = {v["symbol"]: m for m, v in meta.items()}
+    return {"wallet": W, "chain": "solana", "label": label, "generated_at": int(time.time()), "t0": t0,
+            "symbols": syms, "tokens": {s: {"mint": mints[s], **meta[mints[s]]} for s in syms if s in mints},
             "events": events, "series": pts,
-            "notes": "Derived from on-chain balance changes and GeckoTerminal 15m closes. Reasons are auto-generated descriptions, not Baum's own rationale."}
+            "notes": "Derived from on-chain balance changes and GeckoTerminal 15m closes. Reasons are auto-generated descriptions."}
+
+
+def write(data, out_path):
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    with open(out_path, "w") as f:
+    tmp = out_path + ".tmp"
+    with open(tmp, "w") as f:
         f.write("// Generated by scripts/build_replay.py. Do not edit by hand.\nwindow.BAUM_REPLAY = ")
         json.dump(data, f, separators=(",", ":"))
         f.write(";\n")
-    last = pts[-1]
-    print(f"wrote {out_path}: {len(events)} events, {len(pts)} points; equity ${last['eq']:.2f}, "
+    os.replace(tmp, out_path)  # atomic, so a polling page never reads half a file
+
+
+def default_out(W):
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", f"replay-{W[:4]}.js")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("wallet")
+    ap.add_argument("--rpc", default=os.environ.get("SOLANA_RPC_URL"))
+    ap.add_argument("--out")
+    ap.add_argument("--label", default="Baum wallet")
+    a = ap.parse_args()
+    W = a.wallet
+    rpc_url, key = resolve_rpc(a.rpc)
+    print(f"fetching transactions for {W} via {urllib.parse.urlparse(rpc_url).hostname}…", file=sys.stderr)
+    txs = fetch_txs(rpc_url, W, delay=rpc_delay(rpc_url))
+    venues = {}
+    if key:
+        try:
+            venues = helius_venues(key, W)
+            print(f"  venues for {sum(1 for v in venues.values() if v[1] in VENUE)} swaps from Helius", file=sys.stderr)
+        except Exception as e:
+            print(f"  Helius parsed transactions unavailable ({e}); using program IDs for venues", file=sys.stderr)
+    meta, series = load_market(txs)
+    data = build(W, txs, meta, series, venues, a.label)
+    out_path = a.out or default_out(W)
+    write(data, out_path)
+    last = data["series"][-1]
+    print(f"wrote {os.path.relpath(out_path)}: {len(data['events'])} events, {len(data['series'])} points; equity ${last['eq']:.2f}, "
           f"net deposits ${last['dep']:.2f}, PnL ${last['pnl']:.2f}, realized ${last['real']:.2f}", file=sys.stderr)
 
 
