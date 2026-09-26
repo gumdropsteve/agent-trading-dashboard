@@ -1,0 +1,901 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Baum Live</title>
+<meta name="description" content="Prototype: a real-time view of a Baum agent trading a Broker wallet. Mock data.">
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f4f3f0;
+  --surface-1: #fcfcfb;
+  --surface-2: #f0efec;
+  --border: #e2e0da;
+  --grid: #ebe9e4;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #7d7c77;
+  /* event kinds: validated all-pairs (light) */
+  --inc: #2a78d6;
+  --red: #eb6834;
+  --yld: #1baf7a;
+  /* positions: diverging poles */
+  --long: #2a78d6;
+  --short: #e34948;
+  --line: #0b0b0b;
+  --area: rgba(11, 11, 11, 0.06);
+  --focus: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111110;
+    --surface-1: #1a1a19;
+    --surface-2: #232321;
+    --border: #2e2e2b;
+    --grid: #272725;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8f8e86;
+    --inc: #3987e5;
+    --red: #d95926;
+    --yld: #199e70;
+    --long: #3987e5;
+    --short: #e66767;
+    --line: #f2f1ec;
+    --area: rgba(242, 241, 236, 0.07);
+    --focus: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111110;
+  --surface-1: #1a1a19;
+  --surface-2: #232321;
+  --border: #2e2e2b;
+  --grid: #272725;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #8f8e86;
+  --inc: #3987e5;
+  --red: #d95926;
+  --yld: #199e70;
+  --long: #3987e5;
+  --short: #e66767;
+  --line: #f2f1ec;
+  --area: rgba(242, 241, 236, 0.07);
+  --focus: #3987e5;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.num { font-variant-numeric: tabular-nums; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 20px 16px 48px; }
+
+header.top {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
+  margin-bottom: 16px;
+}
+.brand { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin-right: auto; min-width: 0; }
+.brand h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+.brand .sub { color: var(--text-secondary); font-size: 13px; }
+.badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+  padding: 3px 8px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary);
+}
+.badge .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--yld); }
+.playing .badge .pulse { animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.25; } }
+
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface-1); }
+.seg button, .btn {
+  font: inherit; font-size: 13px; color: var(--text-secondary);
+  background: transparent; border: 0; padding: 6px 10px; cursor: pointer;
+}
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--surface-2); color: var(--text-primary); font-weight: 600; }
+.btn { border: 1px solid var(--border); border-radius: 8px; background: var(--surface-1); color: var(--text-primary); min-width: 84px; }
+button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.ctl-label { font-size: 12px; color: var(--text-muted); margin-right: 2px; }
+
+.tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+.tile .k { font-size: 12px; color: var(--text-secondary); }
+.tile .v { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .d { font-size: 12px; color: var(--text-muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px 14px 12px; min-width: 0; }
+.card h2 { font-size: 13px; font-weight: 600; margin: 0; }
+.card .hd { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.card .hd .note { font-size: 12px; color: var(--text-muted); }
+.stack { display: grid; gap: 12px; min-width: 0; }
+
+.chart-wrap { position: relative; }
+canvas { display: block; width: 100%; touch-action: pan-y; }
+#pnl { height: 220px; }
+#lanes { height: 232px; margin-top: 4px; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--text-secondary); margin-top: 6px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend svg { overflow: visible; }
+
+.tip {
+  position: absolute; pointer-events: none; z-index: 5;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+  padding: 8px 10px; font-size: 12px; min-width: 170px; max-width: 280px;
+  opacity: 0; transition: opacity 80ms;
+}
+.tip.on { opacity: 1; }
+.tip .t { color: var(--text-muted); margin-bottom: 4px; }
+.tip .row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.tip .row .l { color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; }
+.tip .row .val { font-weight: 650; color: var(--text-primary); }
+.tip .why { color: var(--text-secondary); margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; }
+.key { display: inline-block; width: 12px; height: 2px; border-radius: 1px; }
+
+/* positions */
+.pos { display: grid; gap: 8px; }
+.pos-row { display: grid; grid-template-columns: 78px minmax(0, 1fr) 84px; align-items: center; gap: 8px; font-size: 12px; }
+.pos-row .name { color: var(--text-secondary); white-space: nowrap; }
+.pos-row .val { text-align: right; color: var(--text-primary); font-weight: 600; white-space: nowrap; }
+.pos-row .val small { display: block; font-weight: 400; color: var(--text-muted); }
+.track { position: relative; height: 14px; }
+.track::before { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--border); }
+.bar { position: absolute; top: 2px; height: 10px; width: 0; transition: width 420ms cubic-bezier(.2,.7,.2,1); }
+.bar.l { left: calc(50% + 1px); background: var(--long); border-radius: 0 4px 4px 0; }
+.bar.s { right: calc(50% + 1px); background: var(--short); border-radius: 4px 0 0 4px; }
+
+/* feed */
+.feed-card { display: flex; flex-direction: column; }
+.feed { list-style: none; margin: 0; padding: 0; flex: 1 1 0; min-height: 320px; overflow: auto; }
+.feed li { padding: 9px 0; border-top: 1px solid var(--border); animation: slide 320ms ease-out; }
+.feed li:first-child { border-top: 0; }
+@keyframes slide { from { opacity: 0; transform: translateY(-6px); } }
+.feed .l1 { display: flex; gap: 8px; align-items: baseline; font-size: 12px; }
+.feed .when { color: var(--text-muted); white-space: nowrap; }
+.feed .what { font-weight: 600; min-width: 0; }
+.feed .why { color: var(--text-secondary); font-size: 12px; margin-top: 2px; }
+.feed .st { font-size: 11px; color: var(--text-muted); margin-top: 3px; display: flex; gap: 8px; align-items: center; }
+.feed .st .ok { color: var(--text-secondary); }
+.chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
+
+details.table { margin-top: 12px; }
+details.table summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+.tbl-wrap { overflow: auto; max-height: 360px; margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--surface-2); color: var(--text-secondary); font-weight: 600; }
+td.r, th.r { text-align: right; }
+
+footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
+
+@media (max-width: 1020px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .feed { flex: none; max-height: 520px; }
+  .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tile .v { font-size: 18px; }
+  #lanes { height: 216px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bar { transition: none; }
+  .feed li { animation: none; }
+  .playing .badge .pulse { animation: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <header class="top">
+    <div class="brand">
+      <h1>Baum Live</h1>
+      <span class="sub">Broker #0417 · agent wallet</span>
+      <span class="badge" title="Everything on this page is simulated"><span class="pulse"></span><span id="modeLabel">REPLAY · MOCK DATA</span></span>
+    </div>
+    <div class="controls">
+      <button class="btn" id="play" type="button">Pause</button>
+      <span class="ctl-label">Speed</span>
+      <div class="seg" id="speed" role="group" aria-label="Replay speed">
+        <button type="button" data-v="1" aria-pressed="false">1 min/s</button>
+        <button type="button" data-v="10" aria-pressed="true">10 min/s</button>
+        <button type="button" data-v="60" aria-pressed="false">1 h/s</button>
+      </div>
+      <span class="ctl-label">Window</span>
+      <div class="seg" id="win" role="group" aria-label="Time window">
+        <button type="button" data-v="180" aria-pressed="false">3h</button>
+        <button type="button" data-v="720" aria-pressed="true">12h</button>
+        <button type="button" data-v="1440" aria-pressed="false">24h</button>
+      </div>
+      <button class="btn" id="theme" type="button" aria-label="Toggle theme">Theme</button>
+    </div>
+  </header>
+
+  <section class="tiles" aria-label="Summary">
+    <div class="tile"><div class="k">Equity</div><div class="v num" id="tEq">–</div><div class="d num" id="tEqD">–</div></div>
+    <div class="tile"><div class="k">Total PnL</div><div class="v num" id="tPnl">–</div><div class="d num" id="tPnlD">–</div></div>
+    <div class="tile"><div class="k">Realized</div><div class="v num" id="tReal">–</div><div class="d" id="tRealD">closed trades + yield</div></div>
+    <div class="tile"><div class="k">Actions</div><div class="v num" id="tN">–</div><div class="d num" id="tND">–</div></div>
+    <div class="tile"><div class="k">Gross exposure</div><div class="v num" id="tExp">–</div><div class="d" id="tExpD">of equity, excl. cash</div></div>
+  </section>
+
+  <div class="grid">
+    <div class="stack">
+      <section class="card">
+        <div class="hd"><h2>PnL and every action, one time axis</h2><span class="note" id="clock">–</span></div>
+        <div class="chart-wrap" id="chartWrap">
+          <canvas id="pnl" role="img" aria-label="Line chart of total profit and loss over the selected window"></canvas>
+          <canvas id="lanes" role="img" aria-label="Timeline of agent actions by asset. Marker size is dollar notional."></canvas>
+          <div class="tip" id="tip" role="tooltip"></div>
+        </div>
+        <div class="legend" aria-label="Legend">
+          <span><svg width="12" height="12" viewBox="-6 -6 12 12"><path d="M0,-5 L5,4 L-5,4 Z" fill="var(--inc)"/></svg>Adds exposure (buy, long, deposit)</span>
+          <span><svg width="12" height="12" viewBox="-6 -6 12 12"><path d="M0,5 L5,-4 L-5,-4 Z" fill="var(--red)"/></svg>Reduces exposure (sell, close, withdraw)</span>
+          <span><svg width="12" height="12" viewBox="-6 -6 12 12"><circle r="5" fill="var(--yld)"/></svg>Yield harvested</span>
+          <span><svg width="12" height="12" viewBox="-6 -6 12 12"><circle r="4.5" fill="none" stroke="var(--text-secondary)" stroke-width="1.5"/></svg>Hollow = sent, awaiting chain confirmation</span>
+        </div>
+        <details class="table" id="tableView">
+          <summary>All actions as a table</summary>
+          <div class="tbl-wrap"><table>
+            <thead><tr><th>Time</th><th>Lane</th><th>Action</th><th class="r">Size</th><th class="r">Price</th><th class="r">Notional</th><th class="r">Realized</th><th>Status</th><th>Reason</th></tr></thead>
+            <tbody id="tbody"></tbody>
+          </table></div>
+        </details>
+      </section>
+
+      <section class="card">
+        <div class="hd"><h2>Positions</h2><span class="note">mark-to-market · bars scale to the largest position</span></div>
+        <div class="pos" id="pos"></div>
+      </section>
+    </div>
+
+    <section class="card feed-card">
+      <div class="hd"><h2>Why Baum acted</h2><span class="note">decision log, newest first</span></div>
+      <ul class="feed" id="feed"></ul>
+    </section>
+  </div>
+
+  <footer>
+    Prototype. The prices, trades and reasons are generated by a seeded simulator in this file. None of it is real, and it isn't financial advice.
+    See README.md for how the real version gets its data.
+  </footer>
+</div>
+
+<script>
+(() => {
+  // ---------- seeded randomness ----------
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const rng = mulberry32(417);
+  const gauss = () => { let u = 0, v = 0; while (!u) u = rng(); while (!v) v = rng(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+  const hex = (n) => { let s = ""; for (let i = 0; i < n; i++) s += "0123456789abcdef"[(rng() * 16) | 0]; return s; };
+
+  // ---------- formatting ----------
+  const nf0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+  const nf2 = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const usd = (v) => (v < 0 ? "−$" : "$") + nf0.format(Math.abs(v));
+  const usdS = (v) => (v > 0.5 ? "+$" : v < -0.5 ? "−$" : "$") + nf0.format(Math.abs(v));
+  const usdC = (v) => (v < 0 ? "−$" : "$") + nf2.format(Math.abs(v));
+  const pct = (v, d = 2) => (v >= 0 ? "+" : "−") + Math.abs(v * 100).toFixed(d) + "%";
+  const px = (p) => p >= 1000 ? nf2.format(p) : p >= 1 ? p.toFixed(2) : p.toFixed(5);
+  const units = (u) => Math.abs(u) >= 1000 ? nf0.format(u) : Math.abs(u) >= 1 ? u.toFixed(2) : u.toFixed(4);
+  const T0 = Date.UTC(2026, 8, 24, 0, 0); // sim epoch, minute 0
+  const clockStr = (m, withDay) => {
+    const d = new Date(T0 + m * 60000);
+    const hh = String(d.getUTCHours()).padStart(2, "0"), mm = String(d.getUTCMinutes()).padStart(2, "0");
+    return withDay ? d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) + " " + hh + ":" + mm + " UTC" : hh + ":" + mm;
+  };
+
+  // ---------- simulated market + wallet ----------
+  // vol = per-hour stdev of log returns
+  const MK = {
+    ETH:  { p: 4180, vol: 0.0065, hist: [] },
+    BAUM: { p: 0.0421, vol: 0.018, hist: [] },
+    NVDA: { p: 186.4, vol: 0.0042, hist: [] },
+  };
+  const START = 100000;
+  const S = {
+    cash: START,
+    hold: { ETH: { u: 0, cost: 0 }, BAUM: { u: 0, cost: 0 }, NVDA: { u: 0, cost: 0 } },
+    lp: { v: 0, fees: 0 },
+    lend: { v: 0, int: 0 },
+    perp: null, // { size (ETH, signed), entry, margin, opened }
+    realized: 0,
+    nvdaLimit: MK.NVDA.p * 0.994,
+    dcaN: 0, lastTP: -999, lastPerp: -999,
+  };
+  const LANES = ["ETH", "BAUM", "NVDA", "ETH-PERP", "LP", "LEND"];
+  const LANE_NAME = { ETH: "ETH", BAUM: "BAUM", NVDA: "NVDA (Stock Token)", "ETH-PERP": "ETH-PERP", LP: "LP USDX/USDG", LEND: "Lend USDG" };
+  const events = [];      // every action ever
+  const pending = new Set(); // lanes with an unconfirmed tx
+  const series = [];      // { t, eq, pnl }
+  let tick = 0;           // integer sim minutes processed
+  let simT = 0;           // fractional sim minutes (display clock)
+  let prefilling = true;
+
+  const perpUpnl = () => S.perp ? S.perp.size * (MK.ETH.p - S.perp.entry) : 0;
+  const holdVal = (a) => S.hold[a].u * MK[a].p;
+  const equity = () => S.cash + holdVal("ETH") + holdVal("BAUM") + holdVal("NVDA") + S.lp.v + S.lp.fees + S.lend.v + S.lend.int + (S.perp ? S.perp.margin + perpUpnl() : 0);
+  const ret = (a, mins) => { const h = MK[a].hist; if (h.length <= mins) return 0; return MK[a].p / h[h.length - 1 - mins] - 1; };
+
+  function act(ev) {
+    ev.id = events.length;
+    ev.t = tick;
+    ev.status = "pending";
+    ev.tx = "0x" + hex(8) + "…" + hex(4);
+    ev.confirmAt = tick + 1 + ((rng() * 3) | 0);
+    ev.born = prefilling ? -1e9 : performance.now();
+    events.push(ev);
+    pending.add(ev.lane);
+    if (!prefilling) onEvent(ev);
+  }
+  function confirm(ev) {
+    ev.apply();
+    ev.status = "confirmed";
+    ev.confirmedAt = tick;
+    pending.delete(ev.lane);
+    if (!prefilling) onConfirm(ev);
+  }
+
+  function swap(asset, usdAmt, reason, extra = {}) {
+    const p = MK[asset].p, h = S.hold[asset];
+    if (usdAmt > 0) {
+      const u = (usdAmt * 0.9995) / p;
+      act({ lane: asset, kind: "inc", label: (extra.label || "Buy") + " " + asset, units: u, price: p, notional: usdAmt, realized: 0, reason,
+        apply() { S.cash -= usdAmt; h.cost += usdAmt; h.u += u; } });
+    } else {
+      const u = Math.min(h.u, -usdAmt / p);
+      if (u <= 0) return;
+      const avg = h.cost / h.u;
+      const pnl = u * (p - avg) - u * p * 0.0005;
+      act({ lane: asset, kind: "red", label: (extra.label || "Sell") + " " + asset, units: -u, price: p, notional: u * p, realized: pnl, reason,
+        apply() { S.cash += u * p * 0.9995; h.cost -= u * avg; h.u -= u; S.realized += pnl; } });
+    }
+  }
+
+  function policy() {
+    const eq = equity();
+    const cashW = S.cash / eq;
+
+    // Seed yield legs when cash sits idle
+    if (!pending.has("LP") && cashW > 0.35 && S.lp.v < 0.3 * eq) {
+      const amt = Math.round(Math.min(18000, S.cash * 0.3) / 500) * 500;
+      act({ lane: "LP", kind: "inc", label: "Add liquidity", units: amt, price: 1, notional: amt, realized: 0,
+        reason: `${(cashW * 100).toFixed(0)}% of the wallet is idle USDX. Adding ${usd(amt)} to the USDX/USDG pool (fee APR 9.1%, pool within 4 bps of peg).`,
+        apply() { S.cash -= amt; S.lp.v += amt; } });
+      return;
+    }
+    if (!pending.has("LEND") && cashW > 0.3 && S.lend.v < 0.2 * eq) {
+      const amt = Math.round(Math.min(14000, S.cash * 0.25) / 500) * 500;
+      act({ lane: "LEND", kind: "inc", label: "Lend USDG", units: amt, price: 1, notional: amt, realized: 0,
+        reason: `Swapping ${usd(amt)} USDX to USDG and supplying it to the USDX lending market at 6.4% APY. Utilization is 71%, well under the kink.`,
+        apply() { S.cash -= amt; S.lend.v += amt; } });
+      return;
+    }
+    if (!pending.has("LP") && cashW < 0.06 && S.lp.v > 6000) {
+      const amt = 5000;
+      act({ lane: "LP", kind: "red", label: "Remove liquidity", units: -amt, price: 1, notional: amt, realized: 0,
+        reason: `Cash buffer is down to ${(cashW * 100).toFixed(1)}%. Pulling ${usd(amt)} from the LP to keep room for scheduled buys.`,
+        apply() { S.lp.v -= amt; S.cash += amt; } });
+      return;
+    }
+
+    // Harvest yield
+    if (tick % 180 === 90 && S.lp.fees > 5 && !pending.has("LP")) {
+      const f = S.lp.fees;
+      act({ lane: "LP", kind: "yld", label: "Harvest LP fees", units: f, price: 1, notional: f, realized: f,
+        reason: `Claimed ${usdC(f)} in swap fees from USDX/USDG. Rolling it into the cash buffer.`,
+        apply() { S.lp.fees -= f; S.cash += f; S.realized += f; } });
+      return;
+    }
+    if (tick % 240 === 200 && S.lend.int > 5 && !pending.has("LEND")) {
+      const f = S.lend.int;
+      act({ lane: "LEND", kind: "yld", label: "Claim interest", units: f, price: 1, notional: f, realized: f,
+        reason: `Claimed ${usdC(f)} of USDG interest from the lending market.`,
+        apply() { S.lend.int -= f; S.cash += f; S.realized += f; } });
+      return;
+    }
+
+    // DCA into BAUM on a schedule
+    if (tick % 90 === 45 && S.cash > 2500 && !pending.has("BAUM")) {
+      S.dcaN++;
+      const r = ret("BAUM", 240);
+      swap("BAUM", 1500, `DCA schedule: 1,500 USDX → BAUM, buy ${S.dcaN} of 30. BAUM is ${pct(r, 1)} over 4h; the schedule buys regardless.`, { label: "DCA" });
+      return;
+    }
+    // Trim BAUM into strength
+    const bh = S.hold.BAUM;
+    if (bh.u > 0 && tick - S.lastTP > 150 && !pending.has("BAUM")) {
+      const avg = bh.cost / bh.u, up = MK.BAUM.p / avg - 1;
+      if (up > 0.07) {
+        S.lastTP = tick;
+        swap("BAUM", -0.25 * holdVal("BAUM"), `BAUM is ${pct(up, 1)} over its ${px(avg)} average cost. Trimming 25% to lock gains; the DCA keeps running.`, { label: "Trim" });
+        return;
+      }
+    }
+
+    // NVDA limit ladder
+    if (!pending.has("NVDA")) {
+      const p = MK.NVDA.p;
+      if (p <= S.nvdaLimit && S.cash > 3500 && holdVal("NVDA") < 0.14 * eq) {
+        const lim = S.nvdaLimit;
+        S.nvdaLimit = p * 0.992;
+        swap("NVDA", 2500, `Limit order filled: 2,500 USDX → NVDA at ${px(p)} (limit ${px(lim)}). Next rung placed at ${px(S.nvdaLimit)}.`, { label: "Limit buy" });
+        return;
+      }
+      const nh = S.hold.NVDA;
+      if (nh.u > 0 && p > (nh.cost / nh.u) * 1.012 && tick % 30 === 0) {
+        swap("NVDA", -0.5 * holdVal("NVDA"), `NVDA reached +1.2% over average cost ${px(nh.cost / nh.u)}. Taking half off the ladder and resetting the buy rung.`, { label: "Limit sell" });
+        S.nvdaLimit = p * 0.994;
+        return;
+      }
+      if (tick % 60 === 0 && S.nvdaLimit < p * 0.992) S.nvdaLimit = p * 0.996; // trail the rung up behind price
+    }
+
+    // ETH momentum rebalance
+    if (tick % 20 === 10 && !pending.has("ETH")) {
+      const r = ret("ETH", 60);
+      const tw = Math.max(0.05, Math.min(0.32, 0.16 + 9 * r));
+      const cw = holdVal("ETH") / eq;
+      const diff = (tw - cw) * eq;
+      if (Math.abs(diff) > 2000) {
+        const amt = Math.max(-7000, Math.min(7000, diff, S.cash - 1500));
+        if (Math.abs(amt) > 1000) {
+          swap("ETH", amt, `ETH ${pct(r)} over 60m. Target weight ${(tw * 100).toFixed(0)}%, holding ${(cw * 100).toFixed(0)}%. ${amt > 0 ? "Adding" : "Reducing"} ${usd(Math.abs(amt))}.`, { label: amt > 0 ? "Buy" : "Sell" });
+          return;
+        }
+      }
+    }
+
+    // ETH perp: momentum entries with TP / SL / time stop
+    if (!pending.has("ETH-PERP")) {
+      if (!S.perp && tick % 10 === 0 && tick - S.lastPerp > 60 && S.cash > 5000) {
+        const r = ret("ETH", 30);
+        if (Math.abs(r) > 0.0035) {
+          const dir = r > 0 ? 1 : -1, notional = 12000, margin = 4000, p = MK.ETH.p;
+          const size = dir * notional / p;
+          act({ lane: "ETH-PERP", kind: "inc", label: (dir > 0 ? "Open long" : "Open short") + " ETH-PERP", units: size, price: p, notional, realized: 0,
+            reason: `ETH ${pct(r)} in 30m with rising volume. ${dir > 0 ? "Long" : "Short"} ${usd(notional)} at 3x. Take profit +18% on margin, stop −10%, time stop 4h.`,
+            apply() { S.cash -= margin; S.perp = { size, entry: p, margin, opened: tick }; } });
+          return;
+        }
+      }
+      if (S.perp) {
+        const u = perpUpnl(), roe = u / S.perp.margin, held = tick - S.perp.opened;
+        let why = null;
+        if (roe >= 0.18) why = `Take profit hit: ${pct(roe, 1)} on margin.`;
+        else if (roe <= -0.10) why = `Stop hit: ${pct(roe, 1)} on margin. Cutting it; thesis invalidated.`;
+        else if (held >= 240) why = `Time stop: 4h with ${pct(roe, 1)} on margin and no follow-through.`;
+        if (why) {
+          const P = S.perp, p = MK.ETH.p, fee = Math.abs(P.size) * p * 0.0004;
+          act({ lane: "ETH-PERP", kind: "red", label: "Close " + (P.size > 0 ? "long" : "short") + " ETH-PERP", units: -P.size, price: p, notional: Math.abs(P.size) * p, realized: u - fee,
+            reason: why + ` Entry ${px(P.entry)}, exit ${px(p)}.`,
+            apply() { S.cash += P.margin + u - fee; S.realized += u - fee; S.perp = null; S.lastPerp = tick; } });
+        }
+      }
+    }
+  }
+
+  function step() {
+    tick++;
+    // market
+    for (const k in MK) {
+      const m = MK[k], s = m.vol / Math.sqrt(60);
+      const shock = rng() < 0.002 ? gauss() * s * 8 : 0; // occasional jumps
+      m.p *= Math.exp(s * gauss() + shock + 0.000002);
+      m.hist.push(m.p);
+      if (m.hist.length > 1500) m.hist.shift();
+    }
+    // accruals
+    S.lp.fees += S.lp.v * (0.091 / 525600) * (0.6 + rng() * 0.8);
+    S.lend.int += S.lend.v * (0.064 / 525600);
+    // chain confirmations
+    for (let i = events.length - 1; i >= 0 && i >= events.length - 12; i--) {
+      const ev = events[i];
+      if (ev.status === "pending" && tick >= ev.confirmAt) confirm(ev);
+    }
+    policy();
+    const eq = equity();
+    series.push({ t: tick, eq, pnl: eq - START });
+    if (series.length > 3000) series.shift();
+  }
+
+  // ---------- DOM refs ----------
+  const $ = (id) => document.getElementById(id);
+  const app = $("app"), feed = $("feed"), tip = $("tip"), tbody = $("tbody");
+  const cPnl = $("pnl"), cLanes = $("lanes"), wrap = $("chartWrap");
+  let C = {};
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    for (const k of ["surface-1", "grid", "border", "text-primary", "text-secondary", "text-muted", "inc", "red", "yld", "line", "area"]) C[k] = cs.getPropertyValue("--" + k).trim();
+  }
+
+  // ---------- feed ----------
+  const feedEls = new Map();
+  function shapeSVG(kind, hollow) {
+    const col = `var(--${kind})`;
+    const fill = hollow ? "none" : col, stroke = hollow ? ` stroke="${col}" stroke-width="1.5"` : "";
+    const d = kind === "inc" ? `<path d="M0,-5 L5,4 L-5,4 Z" fill="${fill}"${stroke}/>` : kind === "red" ? `<path d="M0,5 L5,-4 L-5,-4 Z" fill="${fill}"${stroke}/>` : `<circle r="4.5" fill="${fill}"${stroke}/>`;
+    return `<svg width="11" height="11" viewBox="-6 -6 12 12" aria-hidden="true">${d}</svg>`;
+  }
+  function summary(ev) {
+    if (ev.lane === "LP" || ev.lane === "LEND") return `${ev.label} · ${usdC(ev.notional)}`;
+    return `${ev.label} · ${units(Math.abs(ev.units))} @ ${px(ev.price)} · ${usd(ev.notional)}`;
+  }
+  function onEvent(ev) {
+    const li = document.createElement("li");
+    const l1 = document.createElement("div"); l1.className = "l1";
+    const when = document.createElement("span"); when.className = "when num"; when.textContent = clockStr(ev.t);
+    const shape = document.createElement("span"); shape.className = "shape"; shape.innerHTML = shapeSVG(ev.kind, ev.status === "pending");
+    const what = document.createElement("span"); what.className = "what num"; what.textContent = summary(ev);
+    l1.append(when, shape, what);
+    const why = document.createElement("div"); why.className = "why"; why.textContent = ev.reason;
+    const st = document.createElement("div"); st.className = "st num";
+    const s1 = document.createElement("span"); const s2 = document.createElement("span");
+    st.append(s1, s2);
+    li.append(l1, why, st);
+    li._st = [s1, s2]; li._shape = shape;
+    setStatus(li, ev);
+    feed.prepend(li);
+    feedEls.set(ev.id, li);
+    while (feed.children.length > 60) { const last = feed.lastElementChild; feedEls.forEach((v, k) => { if (v === last) feedEls.delete(k); }); last.remove(); }
+    if ($("tableView").open) addRow(ev, true);
+  }
+  function setStatus(li, ev) {
+    const [s1, s2] = li._st;
+    if (ev.status === "pending") { s1.textContent = "sent · awaiting confirmation"; s1.className = ""; }
+    else { s1.textContent = "✓ confirmed in " + (ev.confirmedAt - ev.t) + " min"; s1.className = "ok"; }
+    s2.textContent = ev.tx + (ev.realized && Math.abs(ev.realized) >= 0.5 ? " · realized " + usdS(ev.realized) : "");
+  }
+  function onConfirm(ev) {
+    const li = feedEls.get(ev.id);
+    if (li) { setStatus(li, ev); li._shape.innerHTML = shapeSVG(ev.kind, false); }
+    const tr = rowEls.get(ev.id);
+    if (tr) tr.lastStatus.textContent = "confirmed";
+  }
+
+  // ---------- table view ----------
+  const rowEls = new Map();
+  function addRow(ev, prepend) {
+    const tr = document.createElement("tr");
+    const cells = [clockStr(ev.t, true), LANE_NAME[ev.lane], ev.label,
+      ev.lane === "LP" || ev.lane === "LEND" ? "–" : units(ev.units), ev.lane === "LP" || ev.lane === "LEND" ? "–" : px(ev.price),
+      usdC(ev.notional), ev.realized ? usdS(ev.realized) : "–", ev.status, ev.reason];
+    cells.forEach((c, i) => { const td = document.createElement("td"); td.textContent = c; if (i >= 3 && i <= 6) td.className = "r num"; if (i === 8) td.style.whiteSpace = "normal"; tr.appendChild(td); });
+    tr.lastStatus = tr.children[7];
+    rowEls.set(ev.id, tr);
+    prepend ? tbody.prepend(tr) : tbody.appendChild(tr);
+  }
+  $("tableView").addEventListener("toggle", (e) => {
+    if (!e.target.open) return;
+    tbody.textContent = ""; rowEls.clear();
+    for (let i = events.length - 1; i >= 0; i--) addRow(events[i], false);
+  });
+
+  // ---------- positions ----------
+  const POS = [
+    { k: "Cash (USDX)", v: () => S.cash },
+    { k: "ETH", v: () => holdVal("ETH"), c: () => S.hold.ETH },
+    { k: "BAUM", v: () => holdVal("BAUM"), c: () => S.hold.BAUM },
+    { k: "NVDA", v: () => holdVal("NVDA"), c: () => S.hold.NVDA },
+    { k: "ETH-PERP", v: () => S.perp ? S.perp.size * MK.ETH.p : 0, perp: true },
+    { k: "LP", v: () => S.lp.v + S.lp.fees },
+    { k: "Lend USDG", v: () => S.lend.v + S.lend.int },
+  ];
+  const posEl = $("pos");
+  POS.forEach((r) => {
+    const row = document.createElement("div"); row.className = "pos-row";
+    const n = document.createElement("div"); n.className = "name"; n.textContent = r.k;
+    const tr = document.createElement("div"); tr.className = "track";
+    const bl = document.createElement("div"); bl.className = "bar l";
+    const bs = document.createElement("div"); bs.className = "bar s";
+    tr.append(bs, bl);
+    const v = document.createElement("div"); v.className = "val num";
+    row.append(n, tr, v);
+    posEl.appendChild(row);
+    r.el = { bl, bs, v };
+  });
+  function renderPositions() {
+    const vals = POS.map((r) => r.v());
+    const max = Math.max(1, ...vals.map(Math.abs));
+    POS.forEach((r, i) => {
+      const val = vals[i], w = (Math.abs(val) / max) * 50;
+      r.el.bl.style.width = (val > 0 ? w : 0) + "%";
+      r.el.bs.style.width = (val < 0 ? w : 0) + "%";
+      let sub = "";
+      if (r.c) { const c = r.c(); if (c.u > 0) sub = usdS(val - c.cost) + " unreal."; }
+      if (r.perp && S.perp) sub = (S.perp.size > 0 ? "long " : "short ") + usdS(perpUpnl());
+      r.el.v.textContent = "";
+      r.el.v.append(document.createTextNode(Math.abs(val) < 0.5 ? "–" : usd(Math.abs(val))));
+      if (sub) { const s = document.createElement("small"); s.textContent = sub; r.el.v.appendChild(s); }
+    });
+  }
+
+  // ---------- tiles ----------
+  function renderTiles() {
+    const eq = equity(), pnl = eq - START;
+    $("tEq").textContent = usd(eq);
+    const dayAgo = series.find((s) => s.t >= tick - 1440);
+    $("tEqD").textContent = dayAgo ? pct(eq / dayAgo.eq - 1) + " over 24h" : "–";
+    $("tPnl").textContent = usdS(pnl);
+    $("tPnlD").textContent = pct(pnl / START) + " on " + usd(START) + " start";
+    $("tReal").textContent = usdS(S.realized);
+    $("tN").textContent = nf0.format(events.length);
+    const pend = events.filter((e) => e.status === "pending").length;
+    $("tND").textContent = pend ? pend + " awaiting confirmation" : "all confirmed";
+    const gross = holdVal("ETH") + holdVal("BAUM") + holdVal("NVDA") + (S.perp ? Math.abs(S.perp.size * MK.ETH.p) : 0) + S.lp.v + S.lend.v;
+    $("tExp").textContent = (gross / eq * 100).toFixed(0) + "%";
+    $("clock").textContent = clockStr(Math.floor(simT), true);
+  }
+
+  // ---------- canvas plumbing ----------
+  const GUTTER = 84, RPAD = 12;
+  function fit(c) {
+    const r = c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    const w = Math.round(r.width * d), h = Math.round(r.height * d);
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    const ctx = c.getContext("2d"); ctx.setTransform(d, 0, 0, d, 0, 0);
+    return { ctx, w: r.width, h: r.height };
+  }
+  let windowMin = 720;
+  const xOf = (t, w) => GUTTER + ((t - (simT - windowMin)) / windowMin) * (w - GUTTER - RPAD);
+  const tOf = (x, w) => (simT - windowMin) + ((x - GUTTER) / (w - GUTTER - RPAD)) * windowMin;
+  function niceStep(span, target) {
+    const raw = span / target, mag = Math.pow(10, Math.floor(Math.log10(raw))), n = raw / mag;
+    return (n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10) * mag;
+  }
+  let hoverX = null, hoverDot = null;
+  const font = (sz, w = 400) => `${w} ${sz}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+
+  function drawPnl() {
+    const { ctx, w, h } = fit(cPnl);
+    ctx.clearRect(0, 0, w, h);
+    const top = 10, bot = h - 8;
+    const lo = simT - windowMin;
+    const vis = series.filter((s) => s.t >= lo - 2);
+    if (vis.length < 2) return;
+    let mn = Math.min(0, ...vis.map((s) => s.pnl)), mx = Math.max(0, ...vis.map((s) => s.pnl));
+    const pad = Math.max(50, (mx - mn) * 0.12); mn -= pad; mx += pad;
+    const step = niceStep(mx - mn, 4);
+    const y = (v) => bot - ((v - mn) / (mx - mn)) * (bot - top);
+    // grid + labels
+    ctx.font = font(11); ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    for (let v = Math.ceil(mn / step) * step; v <= mx; v += step) {
+      const yy = Math.round(y(v)) + 0.5;
+      ctx.strokeStyle = Math.abs(v) < step / 1000 ? C["text-muted"] : C.grid;
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(GUTTER, yy); ctx.lineTo(w - RPAD, yy); ctx.stroke();
+      ctx.fillStyle = C["text-muted"];
+      ctx.fillText(usdS(v), GUTTER - 10, yy);
+    }
+    ctx.save();
+    ctx.beginPath(); ctx.rect(GUTTER, 0, w - GUTTER - RPAD, h); ctx.clip();
+    // area to zero
+    ctx.beginPath();
+    vis.forEach((s, i) => { const xx = xOf(s.t, w); i ? ctx.lineTo(xx, y(s.pnl)) : ctx.moveTo(xx, y(s.pnl)); });
+    ctx.lineTo(xOf(vis[vis.length - 1].t, w), y(0)); ctx.lineTo(xOf(vis[0].t, w), y(0)); ctx.closePath();
+    ctx.fillStyle = C.area; ctx.fill();
+    // line
+    ctx.beginPath();
+    vis.forEach((s, i) => { const xx = xOf(s.t, w); i ? ctx.lineTo(xx, y(s.pnl)) : ctx.moveTo(xx, y(s.pnl)); });
+    ctx.strokeStyle = C.line; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.stroke();
+    // head dot + label
+    const last = vis[vis.length - 1], hx = xOf(last.t, w), hy = y(last.pnl);
+    ctx.beginPath(); ctx.arc(hx, hy, 6, 0, Math.PI * 2); ctx.fillStyle = C["surface-1"]; ctx.fill();
+    ctx.beginPath(); ctx.arc(hx, hy, 4, 0, Math.PI * 2); ctx.fillStyle = C.line; ctx.fill();
+    ctx.restore();
+    ctx.font = font(12, 650); ctx.textAlign = "right"; ctx.textBaseline = "bottom"; ctx.fillStyle = C["text-primary"];
+    ctx.fillText(usdS(last.pnl), Math.min(hx - 8, w - RPAD), hy - 8 < 14 ? hy + 22 : hy - 8);
+    // crosshair
+    if (hoverX != null && hoverX >= GUTTER && hoverX <= w - RPAD) {
+      const t = Math.round(tOf(hoverX, w));
+      const s = series.find((p) => p.t === t);
+      ctx.strokeStyle = C["text-muted"]; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(Math.round(hoverX) + 0.5, top); ctx.lineTo(Math.round(hoverX) + 0.5, h); ctx.stroke();
+      if (s) {
+        ctx.beginPath(); ctx.arc(xOf(s.t, w), y(s.pnl), 5, 0, Math.PI * 2); ctx.fillStyle = C["surface-1"]; ctx.fill();
+        ctx.beginPath(); ctx.arc(xOf(s.t, w), y(s.pnl), 3.5, 0, Math.PI * 2); ctx.fillStyle = C.line; ctx.fill();
+      }
+    }
+  }
+
+  let dotHits = [];
+  function drawShape(ctx, kind, x, y, r, hollow, color) {
+    ctx.beginPath();
+    if (kind === "inc") { ctx.moveTo(x, y - r); ctx.lineTo(x + r * 0.95, y + r * 0.75); ctx.lineTo(x - r * 0.95, y + r * 0.75); ctx.closePath(); }
+    else if (kind === "red") { ctx.moveTo(x, y + r); ctx.lineTo(x + r * 0.95, y - r * 0.75); ctx.lineTo(x - r * 0.95, y - r * 0.75); ctx.closePath(); }
+    else ctx.arc(x, y, r * 0.85, 0, Math.PI * 2);
+    // 2px surface ring separates overlapping marks
+    ctx.lineWidth = 2; ctx.strokeStyle = C["surface-1"]; ctx.stroke();
+    if (hollow) { ctx.lineWidth = 1.75; ctx.strokeStyle = color; ctx.stroke(); }
+    else { ctx.fillStyle = color; ctx.fill(); }
+  }
+  function drawLanes() {
+    const { ctx, w, h } = fit(cLanes);
+    ctx.clearRect(0, 0, w, h);
+    const axisH = 22, lh = (h - axisH) / LANES.length;
+    const lo = simT - windowMin;
+    // lanes
+    ctx.font = font(11, 600); ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    LANES.forEach((l, i) => {
+      const yy = i * lh + lh / 2;
+      if (i % 2 === 0) { ctx.fillStyle = C.grid; ctx.globalAlpha = 0.45; ctx.fillRect(GUTTER, i * lh, w - GUTTER - RPAD, lh); ctx.globalAlpha = 1; }
+      ctx.fillStyle = C["text-secondary"]; ctx.fillText(l, GUTTER - 10, yy);
+    });
+    // time axis
+    const tStep = windowMin <= 180 ? 30 : windowMin <= 720 ? 120 : 240;
+    ctx.font = font(11); ctx.textAlign = "center"; ctx.textBaseline = "top";
+    for (let t = Math.ceil(lo / tStep) * tStep; t <= simT; t += tStep) {
+      const xx = Math.round(xOf(t, w)) + 0.5;
+      ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(xx, 0); ctx.lineTo(xx, h - axisH); ctx.stroke();
+      ctx.fillStyle = C["text-muted"]; ctx.fillText(clockStr(t), xx, h - axisH + 6);
+    }
+    // "now" edge
+    ctx.strokeStyle = C["text-muted"]; ctx.setLineDash([2, 3]);
+    const nx = Math.round(xOf(simT, w)) + 0.5;
+    ctx.beginPath(); ctx.moveTo(nx, 0); ctx.lineTo(nx, h - axisH); ctx.stroke(); ctx.setLineDash([]);
+    // dots
+    const now = performance.now();
+    dotHits = [];
+    ctx.save(); ctx.beginPath(); ctx.rect(GUTTER, 0, w - GUTTER - RPAD + 8, h - axisH); ctx.clip();
+    const NMAX = 14000;
+    for (const ev of events) {
+      if (ev.t < lo - 30) continue;
+      const li = LANES.indexOf(ev.lane);
+      const xx = xOf(ev.t, w), yy = li * lh + lh / 2;
+      let r = 4 + 9 * Math.sqrt(Math.min(1, ev.notional / NMAX));
+      const age = now - ev.born;
+      let alpha = 1;
+      if (age < 700) { const k = age / 700; r *= 1 + 0.9 * (1 - k) * (1 - k); }
+      const color = C[ev.kind];
+      if (age < 900) { // ripple on arrival
+        const k = age / 900;
+        ctx.beginPath(); ctx.arc(xx, yy, r + 18 * k, 0, Math.PI * 2);
+        ctx.strokeStyle = color; ctx.globalAlpha = 0.5 * (1 - k); ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1;
+      }
+      ctx.globalAlpha = alpha;
+      drawShape(ctx, ev.kind, xx, yy, r, ev.status === "pending", color);
+      if (hoverDot === ev) { ctx.lineWidth = 1.5; ctx.strokeStyle = C["text-primary"]; ctx.beginPath(); ctx.arc(xx, yy, r + 4, 0, Math.PI * 2); ctx.stroke(); }
+      dotHits.push({ ev, x: xx, y: yy, r });
+    }
+    ctx.restore();
+    // crosshair
+    if (hoverX != null && hoverX >= GUTTER && hoverX <= w - RPAD) {
+      ctx.strokeStyle = C["text-muted"]; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(Math.round(hoverX) + 0.5, 0); ctx.lineTo(Math.round(hoverX) + 0.5, h - axisH); ctx.stroke();
+    }
+  }
+
+  // ---------- hover ----------
+  function row(label, val, color) {
+    const r = document.createElement("div"); r.className = "row";
+    const l = document.createElement("span"); l.className = "l";
+    if (color) { const k = document.createElement("span"); k.className = "key"; k.style.background = color; l.appendChild(k); }
+    l.appendChild(document.createTextNode(label));
+    const v = document.createElement("span"); v.className = "val num"; v.textContent = val;
+    r.append(l, v); return r;
+  }
+  function updateTip(clientX, clientY) {
+    const wr = wrap.getBoundingClientRect();
+    if (hoverX == null) { tip.classList.remove("on"); return; }
+    tip.textContent = "";
+    const t = document.createElement("div"); t.className = "t num";
+    if (hoverDot) {
+      const ev = hoverDot;
+      t.textContent = clockStr(ev.t, true) + " · " + LANE_NAME[ev.lane];
+      tip.appendChild(t);
+      tip.appendChild(row(ev.label, usdC(ev.notional), C[ev.kind]));
+      if (ev.lane !== "LP" && ev.lane !== "LEND") { tip.appendChild(row("size", units(ev.units))); tip.appendChild(row("price", px(ev.price))); }
+      if (ev.realized) tip.appendChild(row("realized", usdS(ev.realized)));
+      tip.appendChild(row("status", ev.status));
+      const why = document.createElement("div"); why.className = "why"; why.textContent = ev.reason; tip.appendChild(why);
+    } else {
+      const tt = Math.round(tOf(hoverX, cPnl.getBoundingClientRect().width));
+      const s = series.find((p) => p.t === tt);
+      if (!s) { tip.classList.remove("on"); return; }
+      t.textContent = clockStr(s.t, true);
+      tip.appendChild(t);
+      tip.appendChild(row("PnL", usdS(s.pnl), C.line));
+      tip.appendChild(row("Equity", usd(s.eq)));
+      const n = events.filter((e) => Math.abs(e.t - tt) <= windowMin / 120).length;
+      if (n) tip.appendChild(row("actions near here", String(n)));
+    }
+    tip.classList.add("on");
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let lx = clientX - wr.left + 14, ly = clientY - wr.top + 14;
+    if (lx + tw > wr.width) lx = clientX - wr.left - tw - 14;
+    if (ly + th > wr.height) ly = Math.max(0, clientY - wr.top - th - 14);
+    tip.style.left = Math.max(0, lx) + "px"; tip.style.top = ly + "px";
+  }
+  let lastPointer = null;
+  function onMove(e) {
+    const r = e.currentTarget.getBoundingClientRect();
+    hoverX = e.clientX - r.left;
+    hoverDot = null;
+    if (e.currentTarget === cLanes) {
+      const my = e.clientY - r.top;
+      let best = null, bd = 1e9;
+      for (const d of dotHits) {
+        const dd = Math.hypot(d.x - hoverX, d.y - my);
+        if (dd < Math.max(12, d.r + 6) && dd < bd) { bd = dd; best = d.ev; }
+      }
+      hoverDot = best;
+    }
+    lastPointer = { x: e.clientX, y: e.clientY };
+    updateTip(e.clientX, e.clientY);
+  }
+  function onLeave() { hoverX = null; hoverDot = null; lastPointer = null; tip.classList.remove("on"); }
+  for (const c of [cPnl, cLanes]) { c.addEventListener("pointermove", onMove); c.addEventListener("pointerleave", onLeave); }
+
+  // ---------- controls ----------
+  let speed = 10, playing = true;
+  const playBtn = $("play");
+  function setPlaying(p) { playing = p; playBtn.textContent = p ? "Pause" : "Play"; app.classList.toggle("playing", p); }
+  playBtn.addEventListener("click", () => setPlaying(!playing));
+  function seg(id, fn) {
+    const g = $(id);
+    g.addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      g.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      fn(+b.dataset.v);
+    });
+  }
+  seg("speed", (v) => (speed = v));
+  seg("win", (v) => (windowMin = v));
+  $("theme").addEventListener("click", () => {
+    const root = document.documentElement;
+    const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = dark ? "light" : "dark";
+    readColors();
+  });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", readColors);
+  document.addEventListener("keydown", (e) => { if (e.code === "Space" && e.target === document.body) { e.preventDefault(); setPlaying(!playing); } });
+
+  // ---------- run ----------
+  try { const th = new URLSearchParams(location.search).get("theme"); if (th === "light" || th === "dark") document.documentElement.dataset.theme = th; } catch (e) {}
+  readColors();
+  // prefill 30h of history so the page opens mid-story
+  for (let i = 0; i < 1800; i++) step();
+  prefilling = false;
+  simT = tick;
+  events.slice(-40).forEach(onEvent);
+
+  let prev = performance.now(), lastSlow = 0;
+  function frame(now) {
+    const dt = Math.min(0.25, (now - prev) / 1000); prev = now;
+    if (playing) {
+      simT += dt * speed;
+      while (tick < Math.floor(simT)) step();
+    }
+    drawPnl(); drawLanes();
+    if (lastPointer && playing) updateTip(lastPointer.x, lastPointer.y);
+    if (now - lastSlow > 200) { renderTiles(); renderPositions(); lastSlow = now; }
+    requestAnimationFrame(frame);
+  }
+  setPlaying(true);
+  renderTiles(); renderPositions();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
