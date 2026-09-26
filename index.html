@@ -103,6 +103,9 @@ header.top {
   background: transparent; border: 0; padding: 6px 10px; cursor: pointer;
 }
 .seg button + button { border-left: 1px solid var(--border); }
+.seg a { font-size: 13px; color: var(--text-secondary); padding: 6px 10px; text-decoration: none; }
+.seg a + a { border-left: 1px solid var(--border); }
+.seg a[aria-current="page"] { background: var(--surface-2); color: var(--text-primary); font-weight: 600; }
 .seg button[aria-pressed="true"] { background: var(--surface-2); color: var(--text-primary); font-weight: 600; }
 .btn { border: 1px solid var(--border); border-radius: 8px; background: var(--surface-1); color: var(--text-primary); min-width: 84px; }
 button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
@@ -169,6 +172,8 @@ canvas { display: block; width: 100%; touch-action: pan-y; }
 .feed .why { color: var(--text-secondary); font-size: 12px; margin-top: 2px; }
 .feed .st { font-size: 11px; color: var(--text-muted); margin-top: 3px; display: flex; gap: 8px; align-items: center; }
 .feed .st .ok { color: var(--text-secondary); }
+.feed .st a { color: inherit; }
+.note-src { font-size: 12px; color: var(--text-muted); margin: -2px 0 8px; }
 .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
 
 details.table { margin-top: 12px; }
@@ -203,10 +208,14 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
   <header class="top">
     <div class="brand">
       <h1>Baum Live</h1>
-      <span class="sub">Broker #0417 · agent wallet</span>
+      <span class="sub" id="subLabel">Broker #0417 · agent wallet</span>
       <span class="badge" title="Everything on this page is simulated"><span class="pulse"></span><span id="modeLabel">REPLAY · MOCK DATA</span></span>
     </div>
     <div class="controls">
+      <nav class="seg" id="src" aria-label="Data source">
+        <a href="?" data-src="">Simulated</a>
+        <a href="?replay=6s8J" data-src="6s8J">Real wallet</a>
+      </nav>
       <button class="btn" id="play" type="button">Pause</button>
       <span class="ctl-label">Speed</span>
       <div class="seg" id="speed" role="group" aria-label="Replay speed">
@@ -225,11 +234,11 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
   </header>
 
   <section class="tiles" aria-label="Summary">
-    <div class="tile"><div class="k">Equity</div><div class="v num" id="tEq">–</div><div class="d num" id="tEqD">–</div></div>
-    <div class="tile"><div class="k">Total PnL</div><div class="v num" id="tPnl">–</div><div class="d num" id="tPnlD">–</div></div>
-    <div class="tile"><div class="k">Realized</div><div class="v num" id="tReal">–</div><div class="d" id="tRealD">closed trades + yield</div></div>
-    <div class="tile"><div class="k">Actions</div><div class="v num" id="tN">–</div><div class="d num" id="tND">–</div></div>
-    <div class="tile"><div class="k">Gross exposure</div><div class="v num" id="tExp">–</div><div class="d" id="tExpD">of equity, excl. cash</div></div>
+    <div class="tile"><div class="k" id="tk0">Equity</div><div class="v num" id="tEq">–</div><div class="d num" id="tEqD">–</div></div>
+    <div class="tile"><div class="k" id="tk1">Total PnL</div><div class="v num" id="tPnl">–</div><div class="d num" id="tPnlD">–</div></div>
+    <div class="tile"><div class="k" id="tk2">Realized</div><div class="v num" id="tReal">–</div><div class="d" id="tRealD">closed trades + yield</div></div>
+    <div class="tile"><div class="k" id="tk3">Actions</div><div class="v num" id="tN">–</div><div class="d num" id="tND">–</div></div>
+    <div class="tile"><div class="k" id="tk4">Gross exposure</div><div class="v num" id="tExp">–</div><div class="d" id="tExpD">of equity, excl. cash</div></div>
   </section>
 
   <div class="grid">
@@ -245,7 +254,8 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
           <span><svg width="12" height="12" viewBox="-6 -6 12 12"><path d="M0,-5 L5,4 L-5,4 Z" fill="var(--inc)"/></svg>Adds exposure (buy, long, deposit)</span>
           <span><svg width="12" height="12" viewBox="-6 -6 12 12"><path d="M0,5 L5,-4 L-5,-4 Z" fill="var(--red)"/></svg>Reduces exposure (sell, close, withdraw)</span>
           <span><svg width="12" height="12" viewBox="-6 -6 12 12"><circle r="5" fill="var(--yld)"/></svg>Yield harvested</span>
-          <span><svg width="12" height="12" viewBox="-6 -6 12 12"><circle r="4.5" fill="none" stroke="var(--text-secondary)" stroke-width="1.5"/></svg>Hollow = sent, awaiting chain confirmation</span>
+          <span id="lgFlow" hidden><svg width="12" height="12" viewBox="-6 -6 12 12"><rect x="-4.5" y="-4.5" width="9" height="9" rx="1.5" fill="var(--text-muted)"/></svg>Deposit / withdrawal (not counted as PnL)</span>
+          <span id="lgPend"><svg width="12" height="12" viewBox="-6 -6 12 12"><circle r="4.5" fill="none" stroke="var(--text-secondary)" stroke-width="1.5"/></svg>Hollow = sent, awaiting chain confirmation</span>
         </div>
         <details class="table" id="tableView">
           <summary>All actions as a table</summary>
@@ -257,19 +267,21 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
       </section>
 
       <section class="card">
-        <div class="hd"><h2>Positions</h2><span class="note">mark-to-market · bars scale to the largest position</span></div>
+        <div class="hd"><h2>Positions</h2><span class="note" id="posNote">mark-to-market · bars scale to the largest position</span></div>
         <div class="pos" id="pos"></div>
       </section>
     </div>
 
     <section class="card feed-card">
-      <div class="hd"><h2>Why Baum acted</h2><span class="note">decision log, newest first</span></div>
+      <div class="hd"><h2 id="feedTitle">Why Baum acted</h2><span class="note">decision log, newest first</span></div>
+      <p class="note-src" id="feedNote" hidden></p>
       <ul class="feed" id="feed"></ul>
     </section>
   </div>
 
   <footer>
-    Prototype. The prices, trades and reasons are generated by a seeded simulator in this file. None of it is real, and it isn't financial advice.
+    <span id="footSim">Prototype. The prices, trades and reasons are generated by a seeded simulator in this file. None of it is real, and it isn't financial advice.</span>
+    <span id="footReal" hidden>Replay of a real Solana wallet, rebuilt from on-chain balance changes and GeckoTerminal 15-minute prices by scripts/build_replay.py. Not financial advice.</span>
     See README.md for how the real version gets its data.
   </footer>
 </div>
@@ -292,13 +304,16 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
   // ---------- formatting ----------
   const nf0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
   const nf2 = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const usd = (v) => (v < 0 ? "−$" : "$") + nf0.format(Math.abs(v));
-  const usdS = (v) => (v > 0.5 ? "+$" : v < -0.5 ? "−$" : "$") + nf0.format(Math.abs(v));
+  let DEC = 0; // 2 in replay mode: real wallets are small
+  const nfD = () => (DEC ? nf2 : nf0);
+  const usd = (v) => (v < 0 ? "−$" : "$") + nfD().format(Math.abs(v));
+  const usdS = (v) => { const e = DEC ? 0.005 : 0.5; return (v > e ? "+$" : v < -e ? "−$" : "$") + nfD().format(Math.abs(v)); };
   const usdC = (v) => (v < 0 ? "−$" : "$") + nf2.format(Math.abs(v));
   const pct = (v, d = 2) => (v >= 0 ? "+" : "−") + Math.abs(v * 100).toFixed(d) + "%";
   const px = (p) => p >= 1000 ? nf2.format(p) : p >= 1 ? p.toFixed(2) : p.toFixed(5);
-  const units = (u) => Math.abs(u) >= 1000 ? nf0.format(u) : Math.abs(u) >= 1 ? u.toFixed(2) : u.toFixed(4);
-  const T0 = Date.UTC(2026, 8, 24, 0, 0); // sim epoch, minute 0
+  const units = (u) => Math.abs(u) >= 1000 ? nf0.format(u) : Math.abs(u) >= 1 ? u.toFixed(2) : Math.abs(u) >= 0.01 ? u.toFixed(4) : u.toPrecision(3);
+  let T0 = Date.UTC(2026, 8, 24, 0, 0); // epoch for minute 0 (replay mode resets it)
+  const dayStr = (m) => new Date(T0 + m * 60000).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
   const clockStr = (m, withDay) => {
     const d = new Date(T0 + m * 60000);
     const hh = String(d.getUTCHours()).padStart(2, "0"), mm = String(d.getUTCMinutes()).padStart(2, "0");
@@ -323,8 +338,11 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
     nvdaLimit: MK.NVDA.p * 0.994,
     dcaN: 0, lastTP: -999, lastPerp: -999,
   };
-  const LANES = ["ETH", "BAUM", "NVDA", "ETH-PERP", "LP", "LEND"];
-  const LANE_NAME = { ETH: "ETH", BAUM: "BAUM", NVDA: "NVDA (Stock Token)", "ETH-PERP": "ETH-PERP", LP: "LP USDX/USDG", LEND: "Lend USDG" };
+  let LANES = ["ETH", "BAUM", "NVDA", "ETH-PERP", "LP", "LEND"];
+  let LANE_NAME = { ETH: "ETH", BAUM: "BAUM", NVDA: "NVDA (Stock Token)", "ETH-PERP": "ETH-PERP", LP: "LP USDX/USDG", LEND: "Lend USDG" };
+  const params = new URLSearchParams(location.search);
+  const REPLAY_ID = (params.get("replay") || "").replace(/[^A-Za-z0-9_-]/g, "");
+  let RP = null;          // replay state when a wallet file is loaded
   const events = [];      // every action ever
   const pending = new Set(); // lanes with an unconfirmed tx
   const series = [];      // { t, eq, pnl }
@@ -495,7 +513,7 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
     }
   }
 
-  function step() {
+  function simStep() {
     tick++;
     // market
     for (const k in MK) {
@@ -518,6 +536,7 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
     series.push({ t: tick, eq, pnl: eq - START });
     if (series.length > 3000) series.shift();
   }
+  let step = simStep;
 
   // ---------- DOM refs ----------
   const $ = (id) => document.getElementById(id);
@@ -527,18 +546,19 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
   function readColors() {
     const cs = getComputedStyle(document.documentElement);
     for (const k of ["surface-1", "grid", "border", "text-primary", "text-secondary", "text-muted", "inc", "red", "yld", "line", "area"]) C[k] = cs.getPropertyValue("--" + k).trim();
+    C.dep = C.wd = C["text-muted"];
   }
 
   // ---------- feed ----------
   const feedEls = new Map();
   function shapeSVG(kind, hollow) {
-    const col = `var(--${kind})`;
+    const col = kind === "dep" || kind === "wd" ? "var(--text-muted)" : `var(--${kind})`;
     const fill = hollow ? "none" : col, stroke = hollow ? ` stroke="${col}" stroke-width="1.5"` : "";
-    const d = kind === "inc" ? `<path d="M0,-5 L5,4 L-5,4 Z" fill="${fill}"${stroke}/>` : kind === "red" ? `<path d="M0,5 L5,-4 L-5,-4 Z" fill="${fill}"${stroke}/>` : `<circle r="4.5" fill="${fill}"${stroke}/>`;
+    const d = kind === "inc" ? `<path d="M0,-5 L5,4 L-5,4 Z" fill="${fill}"${stroke}/>` : kind === "red" ? `<path d="M0,5 L5,-4 L-5,-4 Z" fill="${fill}"${stroke}/>` : kind === "dep" || kind === "wd" ? `<rect x="-4.5" y="-4.5" width="9" height="9" rx="1.5" fill="${fill}"${stroke}/>` : `<circle r="4.5" fill="${fill}"${stroke}/>`;
     return `<svg width="11" height="11" viewBox="-6 -6 12 12" aria-hidden="true">${d}</svg>`;
   }
   function summary(ev) {
-    if (ev.lane === "LP" || ev.lane === "LEND") return `${ev.label} · ${usdC(ev.notional)}`;
+    if (ev.lane === "LP" || ev.lane === "LEND" || ev.lane === "WALLET") return `${ev.label} · ${usdC(ev.notional)}`;
     return `${ev.label} · ${units(Math.abs(ev.units))} @ ${px(ev.price)} · ${usd(ev.notional)}`;
   }
   function onEvent(ev) {
@@ -563,8 +583,11 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
   function setStatus(li, ev) {
     const [s1, s2] = li._st;
     if (ev.status === "pending") { s1.textContent = "sent · awaiting confirmation"; s1.className = ""; }
-    else { s1.textContent = "✓ confirmed in " + (ev.confirmedAt - ev.t) + " min"; s1.className = "ok"; }
-    s2.textContent = ev.tx + (ev.realized && Math.abs(ev.realized) >= 0.5 ? " · realized " + usdS(ev.realized) : "");
+    else { s1.textContent = RP ? "✓ on-chain" : "✓ confirmed in " + (ev.confirmedAt - ev.t) + " min"; s1.className = "ok"; }
+    s2.textContent = "";
+    if (ev.sig) { const a = document.createElement("a"); a.href = "https://solscan.io/tx/" + encodeURIComponent(ev.sig); a.target = "_blank"; a.rel = "noopener"; a.textContent = ev.tx; s2.appendChild(a); }
+    else s2.textContent = ev.tx;
+    if (ev.realized && Math.abs(ev.realized) >= (DEC ? 0.005 : 0.5)) s2.appendChild(document.createTextNode(" · realized " + usdS(ev.realized)));
   }
   function onConfirm(ev) {
     const li = feedEls.get(ev.id);
@@ -578,7 +601,7 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
   function addRow(ev, prepend) {
     const tr = document.createElement("tr");
     const cells = [clockStr(ev.t, true), LANE_NAME[ev.lane], ev.label,
-      ev.lane === "LP" || ev.lane === "LEND" ? "–" : units(ev.units), ev.lane === "LP" || ev.lane === "LEND" ? "–" : px(ev.price),
+      units(ev.units), ev.lane === "LP" || ev.lane === "LEND" ? "–" : px(ev.price),
       usdC(ev.notional), ev.realized ? usdS(ev.realized) : "–", ev.status, ev.reason];
     cells.forEach((c, i) => { const td = document.createElement("td"); td.textContent = c; if (i >= 3 && i <= 6) td.className = "r num"; if (i === 8) td.style.whiteSpace = "normal"; tr.appendChild(td); });
     tr.lastStatus = tr.children[7];
@@ -602,7 +625,9 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
     { k: "Lend USDG", v: () => S.lend.v + S.lend.int },
   ];
   const posEl = $("pos");
-  POS.forEach((r) => {
+  function buildPositions(rows) {
+  posEl.textContent = "";
+  rows.forEach((r) => {
     const row = document.createElement("div"); row.className = "pos-row";
     const n = document.createElement("div"); n.className = "name"; n.textContent = r.k;
     const tr = document.createElement("div"); tr.className = "track";
@@ -614,7 +639,11 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
     posEl.appendChild(row);
     r.el = { bl, bs, v };
   });
+  }
+  let POSROWS = POS;
+  buildPositions(POS);
   function renderPositions() {
+    const POS = POSROWS;
     const vals = POS.map((r) => r.v());
     const max = Math.max(1, ...vals.map(Math.abs));
     POS.forEach((r, i) => {
@@ -632,6 +661,7 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
 
   // ---------- tiles ----------
   function renderTiles() {
+    if (RP) return renderReplayTiles();
     const eq = equity(), pnl = eq - START;
     $("tEq").textContent = usd(eq);
     const dayAgo = series.find((s) => s.t >= tick - 1440);
@@ -656,9 +686,15 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
     const ctx = c.getContext("2d"); ctx.setTransform(d, 0, 0, d, 0, 0);
     return { ctx, w: r.width, h: r.height };
   }
-  let windowMin = 720;
-  const xOf = (t, w) => GUTTER + ((t - (simT - windowMin)) / windowMin) * (w - GUTTER - RPAD);
-  const tOf = (x, w) => (simT - windowMin) + ((x - GUTTER) / (w - GUTTER - RPAD)) * windowMin;
+  let windowMin = 720, windowAll = false;
+  const domain = () => (windowAll && RP ? [RP.start, RP.end] : [simT - windowMin, simT]);
+  const xOf = (t, w) => { const [a, b] = domain(); return GUTTER + ((t - a) / (b - a)) * (w - GUTTER - RPAD); };
+  const tOf = (x, w) => { const [a, b] = domain(); return a + ((x - GUTTER) / (w - GUTTER - RPAD)) * (b - a); };
+  function pointAt(t) { // last series point at or before t
+    let lo = 0, hi = series.length - 1, best = null;
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (series[m].t <= t) { best = series[m]; lo = m + 1; } else hi = m - 1; }
+    return best;
+  }
   function niceStep(span, target) {
     const raw = span / target, mag = Math.pow(10, Math.floor(Math.log10(raw))), n = raw / mag;
     return (n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10) * mag;
@@ -670,11 +706,11 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
     const { ctx, w, h } = fit(cPnl);
     ctx.clearRect(0, 0, w, h);
     const top = 10, bot = h - 8;
-    const lo = simT - windowMin;
+    const lo = domain()[0];
     const vis = series.filter((s) => s.t >= lo - 2);
     if (vis.length < 2) return;
     let mn = Math.min(0, ...vis.map((s) => s.pnl)), mx = Math.max(0, ...vis.map((s) => s.pnl));
-    const pad = Math.max(50, (mx - mn) * 0.12); mn -= pad; mx += pad;
+    const pad = Math.max(DEC ? 1 : 50, (mx - mn) * 0.12); mn -= pad; mx += pad;
     const step = niceStep(mx - mn, 4);
     const y = (v) => bot - ((v - mn) / (mx - mn)) * (bot - top);
     // grid + labels
@@ -704,11 +740,13 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
     ctx.beginPath(); ctx.arc(hx, hy, 4, 0, Math.PI * 2); ctx.fillStyle = C.line; ctx.fill();
     ctx.restore();
     ctx.font = font(12, 650); ctx.textAlign = "right"; ctx.textBaseline = "bottom"; ctx.fillStyle = C["text-primary"];
-    ctx.fillText(usdS(last.pnl), Math.min(hx - 8, w - RPAD), hy - 8 < 14 ? hy + 22 : hy - 8);
+    const ly = hy - 10 < 14 ? hy + 24 : hy - 10, lx = Math.min(hx - 10, w - RPAD);
+    ctx.lineJoin = "round"; ctx.lineWidth = 5; ctx.strokeStyle = C["surface-1"];
+    ctx.strokeText(usdS(last.pnl), lx, ly); // halo keeps the label legible over the line
+    ctx.fillText(usdS(last.pnl), lx, ly);
     // crosshair
     if (hoverX != null && hoverX >= GUTTER && hoverX <= w - RPAD) {
-      const t = Math.round(tOf(hoverX, w));
-      const s = series.find((p) => p.t === t);
+      const s = pointAt(tOf(hoverX, w));
       ctx.strokeStyle = C["text-muted"]; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(Math.round(hoverX) + 0.5, top); ctx.lineTo(Math.round(hoverX) + 0.5, h); ctx.stroke();
       if (s) {
@@ -723,6 +761,7 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
     ctx.beginPath();
     if (kind === "inc") { ctx.moveTo(x, y - r); ctx.lineTo(x + r * 0.95, y + r * 0.75); ctx.lineTo(x - r * 0.95, y + r * 0.75); ctx.closePath(); }
     else if (kind === "red") { ctx.moveTo(x, y + r); ctx.lineTo(x + r * 0.95, y - r * 0.75); ctx.lineTo(x - r * 0.95, y - r * 0.75); ctx.closePath(); }
+    else if (kind === "dep" || kind === "wd") { const q = r * 0.78; ctx.roundRect ? ctx.roundRect(x - q, y - q, 2 * q, 2 * q, 2) : ctx.rect(x - q, y - q, 2 * q, 2 * q); }
     else ctx.arc(x, y, r * 0.85, 0, Math.PI * 2);
     // 2px surface ring separates overlapping marks
     ctx.lineWidth = 2; ctx.strokeStyle = C["surface-1"]; ctx.stroke();
@@ -733,32 +772,33 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
     const { ctx, w, h } = fit(cLanes);
     ctx.clearRect(0, 0, w, h);
     const axisH = 22, lh = (h - axisH) / LANES.length;
-    const lo = simT - windowMin;
+    const [lo, hi] = domain(), span = hi - lo;
     // lanes
     ctx.font = font(11, 600); ctx.textAlign = "right"; ctx.textBaseline = "middle";
     LANES.forEach((l, i) => {
       const yy = i * lh + lh / 2;
       if (i % 2 === 0) { ctx.fillStyle = C.grid; ctx.globalAlpha = 0.45; ctx.fillRect(GUTTER, i * lh, w - GUTTER - RPAD, lh); ctx.globalAlpha = 1; }
-      ctx.fillStyle = C["text-secondary"]; ctx.fillText(l, GUTTER - 10, yy);
+      ctx.fillStyle = C["text-secondary"]; ctx.fillText(l === "WALLET" ? "IN / OUT" : l, GUTTER - 10, yy);
     });
     // time axis
-    const tStep = windowMin <= 180 ? 30 : windowMin <= 720 ? 120 : 240;
+    const tStep = span <= 180 ? 30 : span <= 720 ? 120 : span <= 1440 ? 240 : span <= 2880 ? 480 : 1440;
+    const t0off = tStep >= 1440 ? ((T0 / 60000) % 1440) : 0; // align daily ticks to UTC midnight
     ctx.font = font(11); ctx.textAlign = "center"; ctx.textBaseline = "top";
-    for (let t = Math.ceil(lo / tStep) * tStep; t <= simT; t += tStep) {
+    for (let t = Math.ceil((lo + t0off) / tStep) * tStep - t0off; t <= Math.min(hi, simT + (windowAll ? span : 0)); t += tStep) {
       const xx = Math.round(xOf(t, w)) + 0.5;
       ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(xx, 0); ctx.lineTo(xx, h - axisH); ctx.stroke();
-      ctx.fillStyle = C["text-muted"]; ctx.fillText(clockStr(t), xx, h - axisH + 6);
+      ctx.fillStyle = C["text-muted"]; ctx.fillText(tStep >= 1440 ? dayStr(t) : clockStr(t), xx, h - axisH + 6);
     }
     // "now" edge
     ctx.strokeStyle = C["text-muted"]; ctx.setLineDash([2, 3]);
-    const nx = Math.round(xOf(simT, w)) + 0.5;
+    const nx = Math.round(Math.min(xOf(simT, w), w - RPAD)) + 0.5;
     ctx.beginPath(); ctx.moveTo(nx, 0); ctx.lineTo(nx, h - axisH); ctx.stroke(); ctx.setLineDash([]);
     // dots
     const now = performance.now();
     dotHits = [];
     ctx.save(); ctx.beginPath(); ctx.rect(GUTTER, 0, w - GUTTER - RPAD + 8, h - axisH); ctx.clip();
-    const NMAX = 14000;
+    const NMAX = RP ? RP.nmax : 14000;
     for (const ev of events) {
       if (ev.t < lo - 30) continue;
       const li = LANES.indexOf(ev.lane);
@@ -805,18 +845,19 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
       t.textContent = clockStr(ev.t, true) + " · " + LANE_NAME[ev.lane];
       tip.appendChild(t);
       tip.appendChild(row(ev.label, usdC(ev.notional), C[ev.kind]));
-      if (ev.lane !== "LP" && ev.lane !== "LEND") { tip.appendChild(row("size", units(ev.units))); tip.appendChild(row("price", px(ev.price))); }
+      if (ev.lane !== "LP" && ev.lane !== "LEND") { tip.appendChild(row("size", units(ev.units))); if (ev.lane !== "WALLET") tip.appendChild(row("price", px(ev.price))); }
       if (ev.realized) tip.appendChild(row("realized", usdS(ev.realized)));
       tip.appendChild(row("status", ev.status));
       const why = document.createElement("div"); why.className = "why"; why.textContent = ev.reason; tip.appendChild(why);
     } else {
-      const tt = Math.round(tOf(hoverX, cPnl.getBoundingClientRect().width));
-      const s = series.find((p) => p.t === tt);
+      const tt = tOf(hoverX, cPnl.getBoundingClientRect().width);
+      const s = pointAt(tt);
       if (!s) { tip.classList.remove("on"); return; }
       t.textContent = clockStr(s.t, true);
       tip.appendChild(t);
       tip.appendChild(row("PnL", usdS(s.pnl), C.line));
       tip.appendChild(row("Equity", usd(s.eq)));
+      if (RP) tip.appendChild(row("Net deposits", usd(s.dep)));
       const n = events.filter((e) => Math.abs(e.t - tt) <= windowMin / 120).length;
       if (n) tip.appendChild(row("actions near here", String(n)));
     }
@@ -851,7 +892,7 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
   let speed = 10, playing = true;
   const playBtn = $("play");
   function setPlaying(p) { playing = p; playBtn.textContent = p ? "Pause" : "Play"; app.classList.toggle("playing", p); }
-  playBtn.addEventListener("click", () => setPlaying(!playing));
+  playBtn.addEventListener("click", () => { if (RP && RP.done) return restartReplay(); setPlaying(!playing); });
   function seg(id, fn) {
     const g = $(id);
     g.addEventListener("click", (e) => {
@@ -861,7 +902,7 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
     });
   }
   seg("speed", (v) => (speed = v));
-  seg("win", (v) => (windowMin = v));
+  seg("win", (v) => { windowAll = v === 0; if (v) windowMin = v; });
   $("theme").addEventListener("click", () => {
     const root = document.documentElement;
     const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
@@ -869,32 +910,134 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
     readColors();
   });
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", readColors);
-  document.addEventListener("keydown", (e) => { if (e.code === "Space" && e.target === document.body) { e.preventDefault(); setPlaying(!playing); } });
+  document.addEventListener("keydown", (e) => { if (e.code === "Space" && e.target === document.body) { e.preventDefault(); playBtn.click(); } });
 
   // ---------- run ----------
   try { const th = new URLSearchParams(location.search).get("theme"); if (th === "light" || th === "dark") document.documentElement.dataset.theme = th; } catch (e) {}
   readColors();
-  // prefill 30h of history so the page opens mid-story
-  for (let i = 0; i < 1800; i++) step();
-  prefilling = false;
-  simT = tick;
-  events.slice(-40).forEach(onEvent);
+  document.querySelectorAll("#src a").forEach((a) => { if (a.dataset.src === REPLAY_ID) a.setAttribute("aria-current", "page"); });
+  const th = params.get("theme");
+  document.querySelectorAll("#src a").forEach((a) => { if (th === "light" || th === "dark") a.href += (a.href.includes("?replay") ? "&" : "") + "theme=" + th; });
+  function boot() {
+  if (REPLAY_ID) {
+    const sc = document.createElement("script");
+    sc.src = "data/replay-" + REPLAY_ID + ".js";
+    sc.onload = () => startReplay(window.BAUM_REPLAY);
+    sc.onerror = () => { $("footReal").hidden = false; $("footReal").textContent = "Couldn't load data/replay-" + REPLAY_ID + ".js. Run scripts/build_replay.py first."; startSim(); };
+    document.head.appendChild(sc);
+  } else startSim();
+  }
+
+  function startSim() {
+    // prefill 30h of history so the page opens mid-story
+    for (let i = 0; i < 1800; i++) step();
+    prefilling = false;
+    simT = tick;
+    events.slice(-40).forEach(onEvent);
+    go();
+  }
+
+  // ---------- replay of a real wallet ----------
+  function startReplay(D) {
+    RP = { D, done: false };
+    DEC = 2;
+    T0 = D.t0 * 1000;
+    const min = (t) => (t - D.t0) / 60;
+    const trades = D.events.filter((e) => e.lane !== "WALLET");
+    const lanes = [];
+    trades.forEach((e) => { if (!lanes.includes(e.lane)) lanes.push(e.lane); });
+    LANES = [...lanes, "WALLET"];
+    LANE_NAME = { WALLET: "Deposits / withdrawals" };
+    lanes.forEach((l) => (LANE_NAME[l] = (D.tokens[l] && D.tokens[l].name && D.tokens[l].name !== l ? D.tokens[l].name + " (" + l + ")" : l)));
+    RP.evs = D.events.map((e, i) => ({ ...e, id: i, t: min(e.t), tx: e.sig.slice(0, 6) + "…" + e.sig.slice(-4), status: "confirmed" }));
+    RP.pts = D.series.map((p) => ({ ...p, t: min(p.t) }));
+    RP.start = Math.max(0, RP.evs[0].t - 120);
+    RP.end = RP.pts[RP.pts.length - 1].t;
+    RP.nmax = Math.max(...RP.evs.map((e) => e.notional));
+    RP.cur = null;
+    // header + labels
+    const w = D.wallet;
+    $("subLabel").textContent = "Solana wallet " + w.slice(0, 4) + "…" + w.slice(-4);
+    $("subLabel").title = w;
+    $("modeLabel").textContent = "REPLAY · ON-CHAIN DATA";
+    $("feedTitle").textContent = "What Baum did";
+    $("feedNote").hidden = false;
+    $("feedNote").textContent = "Descriptions are generated from chain data. Baum's own reasoning shows here once the harness logs it.";
+    $("posNote").textContent = "value at 15-minute marks · bars scale to the largest holding";
+    $("lgFlow").hidden = false; $("lgPend").hidden = true;
+    $("footSim").hidden = true; $("footReal").hidden = false;
+    ["Equity", "PnL vs deposits", "Realized", "Trades", "Best trade"].forEach((k, i) => ($("tk" + i).textContent = k));
+    const setSeg = (id, opts, def) => {
+      const g = $(id); g.textContent = "";
+      opts.forEach(([v, l]) => { const b = document.createElement("button"); b.type = "button"; b.dataset.v = v; b.textContent = l; b.setAttribute("aria-pressed", String(v === def)); g.appendChild(b); });
+    };
+    setSeg("speed", [[60, "1 h/s"], [360, "6 h/s"], [1440, "1 d/s"]], 360); speed = 360;
+    setSeg("win", [[720, "12h"], [2880, "2d"], [0, "All"]], 0); windowAll = true;
+    const order = ["USDC", "USDT", ...lanes, ...D.symbols].filter((x, i, a) => D.symbols.includes(x) && a.indexOf(x) === i);
+    POSROWS = order.map((s) => ({ k: s, v: () => (RP.cur && RP.cur.pos[s]) || 0 }));
+    buildPositions(POSROWS);
+    step = replayStep;
+    restartReplay();
+    if (params.get("at") === "end") { RP.fast = true; while (!RP.done) step(); RP.fast = false; }
+    go();
+    if (RP.done) { setPlaying(false); playBtn.textContent = "Replay"; }
+  }
+  function restartReplay() {
+    events.length = 0; series.length = 0; feed.textContent = ""; feedEls.clear(); tbody.textContent = ""; rowEls.clear();
+    RP.ei = 0; RP.pi = 0; RP.cur = null; RP.done = false;
+    tick = Math.floor(RP.start); simT = RP.start;
+    // show the first hour so the chart isn't empty
+    RP.fast = true; for (let i = 0; i < 60; i++) step(); RP.fast = false;
+    simT = tick;
+    setPlaying(true);
+  }
+  function replayStep() {
+    tick++;
+    while (RP.pi < RP.pts.length && RP.pts[RP.pi].t <= tick) { RP.cur = RP.pts[RP.pi++]; series.push(RP.cur); }
+    while (RP.ei < RP.evs.length && RP.evs[RP.ei].t <= tick) {
+      const ev = { ...RP.evs[RP.ei++], born: RP.fast ? -1e9 : performance.now() };
+      ev.confirmedAt = ev.t;
+      events.push(ev); onEvent(ev);
+    }
+    if (tick >= RP.end && !RP.done) { RP.done = true; setPlaying(false); playBtn.textContent = "Replay"; simT = RP.end; }
+  }
+  function renderReplayTiles() {
+    const p = RP.cur || { eq: 0, dep: 0, pnl: 0, real: 0 };
+    $("tEq").textContent = usd(p.eq);
+    $("tEqD").textContent = "net deposits " + usd(p.dep);
+    $("tPnl").textContent = usdS(p.pnl);
+    $("tPnlD").textContent = p.dep > 0 ? pct(p.pnl / p.dep) + " · equity − net deposits" : "equity − net deposits";
+    $("tReal").textContent = usdS(p.real);
+    $("tRealD").textContent = "average-cost basis";
+    const tr = events.filter((e) => e.lane !== "WALLET"), fl = events.length - tr.length;
+    $("tN").textContent = nf0.format(tr.length);
+    $("tND").textContent = "+ " + fl + " deposit" + (fl === 1 ? "" : "s") + "/withdrawal" + (fl === 1 ? "" : "s");
+    const best = tr.filter((e) => e.realized > 0).sort((a, b) => b.realized - a.realized)[0];
+    $("tExp").textContent = best ? usdS(best.realized) : "–";
+    $("tExpD").textContent = best ? best.label + (best.ret != null ? " · " + pct(best.ret, 0) : "") : "no closed winners yet";
+    $("clock").textContent = clockStr(Math.floor(Math.min(simT, RP.end)), true);
+  }
 
   let prev = performance.now(), lastSlow = 0;
+  function go() {
+    setPlaying(true);
+    renderTiles(); renderPositions();
+    prev = performance.now();
+    requestAnimationFrame(frame);
+  }
   function frame(now) {
     const dt = Math.min(0.25, (now - prev) / 1000); prev = now;
     if (playing) {
       simT += dt * speed;
-      while (tick < Math.floor(simT)) step();
+      if (RP) simT = Math.min(simT, RP.end + 1);
+      while (tick < Math.floor(simT) && !(RP && RP.done)) step();
     }
     drawPnl(); drawLanes();
     if (lastPointer && playing) updateTip(lastPointer.x, lastPointer.y);
     if (now - lastSlow > 200) { renderTiles(); renderPositions(); lastSlow = now; }
     requestAnimationFrame(frame);
   }
-  setPlaying(true);
-  renderTiles(); renderPositions();
-  requestAnimationFrame(frame);
+  boot();
 })();
 </script>
 </body>

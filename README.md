@@ -4,7 +4,9 @@ A prototype of a live dashboard for watching a Baum agent trade a Broker wallet.
 
 The prompt was [Kyle Samani's question](https://x.com/KyleSamani/status/2103336166158188570): *"Has anyone built any really good real-time live visualizations of an agent trading? … You can see some sort of timeline, position sizes, PNLs, those kinds of things in some sort of beautiful moving system."* Baum is well placed to answer it. It already trades (chat swaps on Solana and Robinhood Chain), it has run the USDX vault for six months, and it goes out to 3,888 Broker wallets when the beta opens around Oct 1.
 
-![Baum Live prototype](docs/screenshot.png)
+![Baum Live replaying a real Solana wallet](docs/replay.png)
+
+*Above: replay of a real Baum wallet on Solana. [Simulated mode](docs/screenshot.png) runs a mock Broker wallet through every Portal action.*
 
 ## Run it
 
@@ -16,9 +18,20 @@ open index.html          # macOS
 python3 -m http.server 8000   # then http://localhost:8000
 ```
 
-`?theme=light` or `?theme=dark` forces a theme; otherwise the page follows the OS setting. Space pauses and resumes.
+The page has two sources, switched in the header:
 
-**All data in the prototype is mock data.** A seeded simulator in the page generates the prices, actions and reasons, and the page renders them. Nothing touches a chain.
+- **Simulated** (default): a seeded simulator in the page generates the prices, actions and reasons. Nothing touches a chain.
+- **Real wallet** (`?replay=6s8J`): a replay of wallet `6s8JDoMHFQNtJG5LFdKvqnPjqai3ucxrdANQJxjKzyqd` on Solana, rebuilt from on-chain data. See [Replaying a real wallet](#replaying-a-real-wallet).
+
+URL parameters:
+
+| Param | Effect |
+|---|---|
+| `replay=<id>` | Load `data/replay-<id>.js` instead of the simulator |
+| `at=end` | Jump straight to the end of a replay (for screenshots and sharing a still) |
+| `theme=light` / `theme=dark` | Force a theme (otherwise the page follows the OS) |
+
+Space pauses and resumes.
 
 ## What's on the page
 
@@ -35,6 +48,34 @@ python3 -m http.server 8000   # then http://localhost:8000
 Hovering the PnL chart shows a crosshair with PnL and equity. Hovering a marker shows the full action with its reason.
 
 The simulated agent runs the Portal actions from `baum-docs/portal/actions.md`: a BAUM DCA schedule with take-profit trims, a limit-order ladder on a Stock Token, an ETH momentum rebalance, LP on USDX/USDG, and USDG lending with periodic harvests. It also runs an ETH perp with take-profit, stop and time stop, because perps are on the "coming later" list and Kyle asked about them specifically.
+
+## Replaying a real wallet
+
+`scripts/build_replay.py` turns any Solana wallet into a replay file. It uses only the standard library and needs no API keys:
+
+```sh
+python3 scripts/build_replay.py <wallet> --label "Baum test wallet"   # writes data/replay-<first4>.js
+open "index.html?replay=<first4>"
+```
+
+What it does, which is a small version of the pipeline below:
+
+1. **Pulls every transaction** for the wallet from a Solana RPC (`--rpc` or `SOLANA_RPC_URL`; the public endpoint works for small wallets).
+2. **Reduces each one to the wallet's own balance changes** (SOL and SPL tokens), so it doesn't matter which aggregator routed the swap (Jupiter, DFlow, a relayer).
+3. **Classifies each one**: one asset in and one out is a swap, only in is a deposit, only out is a withdrawal. SOL moves under 0.0025 are fees or rent, not a trade leg. The swap's quote leg (USDC > USDT > USDX > SOL) prices it, and the other leg is the lane it appears in.
+4. **Accounts for it**: average cost per asset, realized PnL on sells, and deposits and withdrawals tracked as net deposits so moving money in and out never shows up as profit or loss. **PnL = equity − net deposits.**
+5. **Marks holdings to market** every 15 minutes using GeckoTerminal candles from each token's deepest pool (DexScreener finds the pool when GeckoTerminal doesn't know the token). USDC and USDT are pinned at $1.
+6. **Writes `data/replay-<id>.js`**: the events, a mark-to-market series (equity, net deposits, PnL, realized, per-asset value), and token metadata. The page only replays it and derives nothing itself.
+
+What the `6s8J` wallet shows (Sep 20–26): 11 trades and 4 deposits or withdrawals, ending at **$181.53 equity on $165.93 net deposits (+$15.59), with +$3.90 realized**. The best trade was selling half a PAID position at +134%. The chart shows a SHARTCOIN position that ran to 3x on paper, then sold a day later at +7.6%. Unrealized PnL like that is exactly what a live view makes visible.
+
+Limitations of this first version:
+
+- **The descriptions aren't Baum's reasoning.** They're generated from the chain ("sold 50% of the position at +134% vs average cost"). The real reason feed needs the harness hook described below.
+- **Multi-leg transactions are skipped** (e.g. an LP deposit that takes two tokens in one tx). None occur in this wallet.
+- **Marks are 15-minute closes**, so a position bought and sold inside one candle shows its realized PnL but not its intra-candle path.
+- **Public endpoints rate-limit.** The script backs off, but a wallet with thousands of transactions wants a Helius or Triton RPC.
+- **Solana only.** Robinhood Chain needs the same reducer over Blockscout's token-transfer API.
 
 ## How to build the real thing
 
@@ -100,7 +141,7 @@ A grid of all 3,888 Deed Deck cards. A card flashes in the action's color when i
 
 ## Rollout
 
-1. **Vault replay (no harness changes).** Index six months of the USDX vault's on-chain history and play it back through this UI. Reasons aren't available for past trades, so leave that column empty or fill it with auto-generated labels ("rebalance", "peg defense"). It ships a demo and gives @baumreview clips to post in reply to Kyle.
+1. **Wallet replay (no harness changes).** ✅ Prototyped: `scripts/build_replay.py` plus `?replay=`. The USDX vault turned out to be mostly deposits and locks, so the first real replay is a Baum trading wallet instead. Next: run it on the wallets with the most activity, and record a clip for @baumreview to post in reply to Kyle.
 2. **Live vault + chat swaps.** Add the decision-event hook to the harness so the reason feed is real. Stream live.
 3. **Broker wallets at beta (~Oct 1).** Index every Broker wallet, add the opt-in per-Broker pages, and ship the fleet view.
 4. **Perps.** When perps reach the Portal, add leverage, liquidation price and funding to the lanes and positions. The schema above already has fields for them.
